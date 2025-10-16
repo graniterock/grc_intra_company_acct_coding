@@ -24,3 +24,69 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* === Graniterock brand tokens === */
+/* Sources: Corporate Graphic Standard Guidelines (Updated July 2025) */
+
+:root {
+  /* Core brand */
+  --gr-green: #003f2c; /* Graniterock Green */
+  --gr-orange: #f47a20; /* Graniterock Orange */
+  --gr-pistachio: #789d90; /* Pistachio Green */
+  --gr-lime: #85a63f; /* Lime Green */
+  --gr-grey-5: #a7a9ac; /* Cool Grey 5 (HEX corrected from RGB 167/169/172) */
+
+  /* Semantics for UI */
+  --gr-primary: var(--gr-green);
+  --gr-accent: var(--gr-orange);
+  --gr-surface: #ffffff;
+  --gr-surface-alt: color-mix(in srgb, var(--gr-grey-5) 8%, white);
+  --gr-ink: #1a1a1a;
+  --gr-ink-muted: #394146;
+  --gr-line: #e2e8f0;
+
+  /* Focus + selection */
+  --gr-focus: var(--gr-lime);
+  --gr-selection: color-mix(in srgb, var(--gr-primary) 15%, white);
+}
+
+/* Buttons/links that use brand colors (optional helpers) */
+.btn-brand {
+  background: var(--gr-primary);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+}
+.btn-brand:hover {
+  background: color-mix(in srgb, var(--gr-primary) 85%, black);
+}
+
+.link-brand {
+  color: var(--gr-primary);
+}
+.link-brand:hover {
+  color: color-mix(in srgb, var(--gr-primary) 80%, black);
+}
+
+/* === AG Grid (Quartz) theme alignment to brand === */
+.ag-theme-quartz {
+  --ag-foreground-color: var(--gr-ink);
+  --ag-secondary-foreground-color: var(--gr-ink-muted);
+  --ag-background-color: var(--gr-surface);
+  --ag-header-background-color: color-mix(in srgb, var(--gr-primary) 8%, white);
+  --ag-odd-row-background-color: color-mix(in srgb, var(--gr-grey-5) 6%, white);
+  --ag-borders: var(--gr-line);
+
+  --ag-selected-row-background-color: var(--gr-selection);
+  --ag-range-selection-border-color: var(--gr-primary);
+  --ag-input-focus-border-color: var(--gr-focus);
+  --ag-checkbox-checked-color: var(--gr-primary);
+  --ag-header-foreground-color: var(--gr-ink);
+}
+
+/* Slight rounding for a modern look */
+.ag-theme-quartz .ag-root-wrapper,
+.ag-theme-quartz .ag-cell,
+.ag-theme-quartz .ag-header-cell {
+  border-radius: 6px;
+}
