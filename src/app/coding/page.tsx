@@ -6,7 +6,7 @@ export const metadata = {
 
 export default function CodingPage() {
   return (
-    <main className="mx-auto max-w-7xl p-6 space-y-6">
+    <main className="w-full px-6 py-6 space-y-6 min-h-screen flex flex-col">
       <h1 className="text-2xl font-semibold" style={{ color: "var(--gr-ink)" }}>
         Intra-Company Coding
       </h1>
@@ -15,4 +15,3 @@ export default function CodingPage() {
     </main>
   );
 }
-

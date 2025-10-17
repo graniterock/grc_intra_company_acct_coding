@@ -47,7 +47,11 @@ const initialRows: TicketRow[] = [
   },
 ];
 
-export default function TicketsGrid() {
+type TicketsGridProps = {
+  height?: number | string;
+};
+
+export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [rows, setRows] = useState<TicketRow[]>(initialRows);
 
   const columns = useMemo<ReadonlyArray<Column<TicketRow>>>(
@@ -83,8 +87,11 @@ export default function TicketsGrid() {
     []
   );
 
+  const resolvedHeight =
+    typeof height === "number" ? `${height}px` : height;
+
   return (
-    <div style={{ height: 500 }}>
+    <div className="w-full" style={{ height: resolvedHeight, minHeight: 400 }}>
       <DataGrid<TicketRow>
         columns={columns}
         rows={rows}
@@ -98,6 +105,7 @@ export default function TicketsGrid() {
             [columnKey]: event.sourceRow[columnKey],
           };
         }}
+        style={{ height: "100%", width: "100%" }}
       />
     </div>
   );
