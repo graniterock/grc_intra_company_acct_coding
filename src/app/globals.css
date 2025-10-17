@@ -90,3 +90,14 @@ body {
 .ag-theme-quartz .ag-header-cell {
   border-radius: 6px;
 }
+
+/* React Data Grid - keep cells on a white surface with black text */
+.rdg {
+  color: #000;
+}
+
+.rdg,
+.rdg .rdg-row,
+.rdg .rdg-cell {
+  background-color: var(--gr-surface);
+}
