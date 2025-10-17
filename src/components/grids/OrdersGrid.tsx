@@ -1,20 +1,13 @@
 ﻿"use client";
 
 import { useMemo, useState } from "react";
-import { AgGridReact } from "ag-grid-react";
-import type { ColDef, GridOptions } from "ag-grid-community";
+import { DataGrid, Column } from "react-data-grid";
+import type { FillEvent } from "react-data-grid";
+import "react-data-grid/lib/styles.css";
+
 import type { OrderRow } from "../../types/grids";
 
-/* v33+/v34: register bundled modules once */
-import { ModuleRegistry, AllCommunityModule } from "ag-grid-community";
-import { AllEnterpriseModule } from "ag-grid-enterprise";
-ModuleRegistry.registerModules([AllCommunityModule, AllEnterpriseModule]);
-
-/* AG Grid CSS */
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
-
-/* Mock rows */
+/* Seed rows */
 const initialRows: OrderRow[] = [
   {
     OrderNumber: "O-70001",
@@ -49,66 +42,59 @@ const initialRows: OrderRow[] = [
 ];
 
 export default function OrdersGrid() {
-  const [rowData, setRowData] = useState<OrderRow[]>(initialRows);
+  const [rows, setRows] = useState<OrderRow[]>(initialRows);
 
-  const defaultColDef = useMemo<ColDef>(
-    () => ({
-      editable: true,
-      sortable: true,
-      filter: true,
-      floatingFilter: true,
-      resizable: true,
-    }),
-    []
-  );
-
-  const columnDefs = useMemo<ColDef<OrderRow>[]>(
+  const columns = useMemo<ReadonlyArray<Column<OrderRow>>>(
     () => [
-      { field: "OrderNumber", headerName: "Order Number", width: 150 },
-      { field: "ProductCode", width: 140 },
-      { field: "ProductDesc", flex: 1, minWidth: 160 },
-      { field: "StartDate", width: 130 },
-      { field: "EndDate", width: 130 },
-      { field: "OrderAcctCode", headerName: "Order AcctCode", width: 160 },
+      { key: "OrderNumber", name: "Order #", width: 150, editable: true },
+      { key: "ProductCode", name: "Product", width: 140, editable: true },
       {
-        field: "FreightCodeByTon_AA",
-        headerName: "Freight Code By Ton (AA)",
-        width: 220,
+        key: "ProductDesc",
+        name: "Description",
+        editable: true,
+        resizable: true,
       },
-      { field: "ERF_AcctCode", headerName: "ERF AcctCode", width: 150 },
-      { field: "MTX_AcctCode", headerName: "MTX AcctCode", width: 150 },
-      { field: "AcctCode", width: 140 },
-      { field: "PW_AcctCode", headerName: "PW AcctCode", width: 150 },
-      { field: "LAS_AcctCode", headerName: "LAS AcctCode", width: 150 },
-      { field: "FS_AcctCode", headerName: "FS AcctCode", width: 150 },
+      { key: "StartDate", name: "Start", width: 130, editable: true },
+      { key: "EndDate", name: "End", width: 130, editable: true },
+      {
+        key: "OrderAcctCode",
+        name: "Order AcctCode",
+        width: 160,
+        editable: true,
+      },
+      {
+        key: "FreightCodeByTon_AA",
+        name: "Freight Code By Ton (AA)",
+        width: 220,
+        editable: true,
+      },
+      { key: "ERF_AcctCode", name: "ERF AcctCode", width: 150, editable: true },
+      { key: "MTX_AcctCode", name: "MTX AcctCode", width: 150, editable: true },
+      { key: "AcctCode", name: "Acct Code", width: 140, editable: true },
+      { key: "PW_AcctCode", name: "PW AcctCode", width: 150, editable: true },
+      { key: "LAS_AcctCode", name: "LAS AcctCode", width: 150, editable: true },
+      { key: "FS_AcctCode", name: "FS AcctCode", width: 150, editable: true },
     ],
     []
   );
 
-  const gridOptions: GridOptions<OrderRow> = {
-    defaultColDef,
-    columnDefs,
-    rowData,
-    rowSelection: "multiple",
-
-    enableRangeSelection: true,
-    enableFillHandle: true,
-
-    animateRows: true,
-
-    onCellValueChanged: (e) => {
-      if (!e.colDef.field) return;
-      setRowData((prev) =>
-        prev.map((r, idx) =>
-          idx === e.rowIndex ? { ...r, [e.colDef.field!]: e.newValue } : r
-        )
-      );
-    },
-  };
-
   return (
-    <div className="ag-theme-quartz" style={{ height: 500, width: "100%" }}>
-      <AgGridReact<OrderRow> theme="legacy" gridOptions={gridOptions} />
+    <div style={{ height: 500 }}>
+      {/* Note the 3rd generic: <OrderRow, unknown, string> */}
+      <DataGrid<OrderRow, unknown, string>
+        columns={columns}
+        rows={rows}
+        onRowsChange={setRows}
+        rowKeyGetter={(r: OrderRow) => r.OrderNumber}
+        /* Drag-to-fill - produce a new row for the target */
+        onFill={(event: FillEvent<OrderRow>) => {
+          const columnKey = event.columnKey as keyof OrderRow;
+          return {
+            ...event.targetRow,
+            [columnKey]: event.sourceRow[columnKey],
+          };
+        }}
+      />
     </div>
   );
 }

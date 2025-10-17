@@ -1,6 +1,4 @@
-﻿import TicketsGrid from "../../components/grids/TicketsGrid";
-import OrdersGrid  from "../../components/grids/OrdersGrid";
-import { Tabs } from "../../components/ui/Tabs";
+import CodingGridSwitcher from "./CodingGridSwitcher";
 
 export const metadata = {
   title: "Intra-Company Coding | Graniterock",
@@ -13,9 +11,8 @@ export default function CodingPage() {
         Intra-Company Coding
       </h1>
 
-      <Tabs labels={["Tickets", "Orders"]}>
-        {[<TicketsGrid key="t" />, <OrdersGrid key="o" />]}
-      </Tabs>
+      <CodingGridSwitcher />
     </main>
   );
 }
+

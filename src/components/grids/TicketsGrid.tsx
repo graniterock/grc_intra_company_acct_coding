@@ -1,20 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AgGridReact } from "ag-grid-react";
-import type { ColDef, GridOptions, ValueParserParams } from "ag-grid-community";
-import type { TicketRow } from "../../types/grids";
+import { DataGrid, Column, RenderEditCellProps } from "react-data-grid";
+import type { FillEvent } from "react-data-grid";
+import "react-data-grid/lib/styles.css";
 
-/* v33+/v34 module registration: use the “All…” bundles */
-import { ModuleRegistry, AllCommunityModule } from "ag-grid-community";
-import { AllEnterpriseModule } from "ag-grid-enterprise";
-ModuleRegistry.registerModules([AllCommunityModule, AllEnterpriseModule]);
+/* Row shape for tickets */
+type TicketRow = {
+  TicketNo: string;
+  BranchNo: string;
+  OrderNumber: string;
+  ProductCode: string;
+  ProductDesc: string;
+  TicketDate: string;
+  UOM: string;
+  QTY: number;
+  UnitPrice: number;
+  AcctCode: string;
+};
 
-/* AG Grid CSS (Quartz theme) */
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
-
-/* Mock rows */
+/* Seed rows */
 const initialRows: TicketRow[] = [
   {
     TicketNo: "T-10001",
@@ -43,65 +48,92 @@ const initialRows: TicketRow[] = [
 ];
 
 export default function TicketsGrid() {
-  const [rowData, setRowData] = useState<TicketRow[]>(initialRows);
+  const [rows, setRows] = useState<TicketRow[]>(initialRows);
 
-  const defaultColDef = useMemo<ColDef>(
-    () => ({
-      editable: true,
-      sortable: true,
-      filter: true,
-      floatingFilter: true,
-      resizable: true,
-    }),
-    []
-  );
-
-  const columnDefs = useMemo<ColDef<TicketRow>[]>(
+  const columns = useMemo<ReadonlyArray<Column<TicketRow>>>(
     () => [
-      { field: "TicketNo", width: 130 },
-      { field: "BranchNo", width: 110 },
-      { field: "OrderNumber", width: 140 },
-      { field: "ProductCode", width: 140 },
-      { field: "ProductDesc", flex: 1, minWidth: 160 },
-      { field: "TicketDate", width: 130 },
-      { field: "UOM", width: 90 },
-      { field: "QTY", width: 100, valueParser: numberParser },
-      { field: "UnitPrice", width: 120, valueParser: numberParser },
-      { field: "AcctCode", width: 160 },
+      { key: "TicketNo", name: "Ticket #", width: 120, editable: true },
+      { key: "BranchNo", name: "Branch", width: 100, editable: true },
+      { key: "OrderNumber", name: "Order #", width: 140, editable: true },
+      { key: "ProductCode", name: "Product", width: 120, editable: true },
+      {
+        key: "ProductDesc",
+        name: "Description",
+        editable: true,
+        resizable: true,
+      },
+      { key: "TicketDate", name: "Date", width: 130, editable: true },
+      { key: "UOM", name: "UOM", width: 90, editable: true },
+      {
+        key: "QTY",
+        name: "Qty",
+        width: 100,
+        editable: true,
+        renderEditCell: NumberEditor<TicketRow>,
+      },
+      {
+        key: "UnitPrice",
+        name: "Unit Price",
+        width: 120,
+        editable: true,
+        renderEditCell: NumberEditor<TicketRow>,
+      },
+      { key: "AcctCode", name: "Acct Code", width: 160, editable: true },
     ],
     []
   );
 
-  const gridOptions: GridOptions<TicketRow> = {
-    defaultColDef,
-    columnDefs,
-    rowData,
-    rowSelection: "multiple",
-    enableRangeSelection: true,
-    enableFillHandle: true,
-
-    animateRows: true,
-
-    onCellValueChanged: (e) => {
-      if (!e.colDef.field) return;
-      setRowData((prev) =>
-        prev.map((r, idx) =>
-          idx === e.rowIndex ? { ...r, [e.colDef.field!]: e.newValue } : r
-        )
-      );
-    },
-  };
-
   return (
-    <div className="ag-theme-quartz" style={{ height: 500, width: "100%" }}>
-      {/* For legacy CSS themes in v34+ you can pass theme="legacy".
-          If your preview renders fine without it, you can drop the prop. */}
-      <AgGridReact<TicketRow> theme="legacy" gridOptions={gridOptions} />
+    <div style={{ height: 500 }}>
+      <DataGrid<TicketRow>
+        columns={columns}
+        rows={rows}
+        onRowsChange={setRows}
+        rowKeyGetter={(r: TicketRow) => r.TicketNo}
+        /* Drag-to-fill (TS-safe cast of RDG FillEvent) */
+        onFill={(event: FillEvent<TicketRow>) => {
+          const columnKey = event.columnKey as keyof TicketRow;
+          return {
+            ...event.targetRow,
+            [columnKey]: event.sourceRow[columnKey],
+          };
+        }}
+      />
     </div>
   );
 }
 
-function numberParser(params: ValueParserParams<TicketRow>) {
-  const v = parseFloat(String(params.newValue));
-  return Number.isFinite(v) ? v : params.oldValue;
+/** Simple numeric editor: keeps prior value if input is NaN */
+function NumberEditor<R extends Record<string, unknown>>({
+  row,
+  column,
+  onRowChange,
+}: RenderEditCellProps<R>) {
+  const key = column.key as keyof R;
+  const val = row[key] as unknown as string | number | undefined;
+
+  const commit = (raw: string) => {
+    const n = parseFloat(raw);
+    onRowChange(
+      { ...row, [key]: Number.isFinite(n) ? (n as any) : (val as any) },
+      true
+    );
+  };
+
+  return (
+    <input
+      autoFocus
+      type="number"
+      value={val ?? ""}
+      onChange={(e) => commit(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      style={{
+        width: "100%",
+        height: "100%",
+        border: "none",
+        outline: "none",
+        padding: "0 8px",
+      }}
+    />
+  );
 }
