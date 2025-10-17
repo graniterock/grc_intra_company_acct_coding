@@ -6,6 +6,7 @@ export default function Home() {
       <h1 className="text-2xl font-semibold" style={{ color: "var(--gr-ink)" }}>
         Tickets – Prototype
       </h1>
+      <p><a className="underline" href="/coding">Open Coding (Tickets & Orders) →</a></p>
       <TicketsGrid />
     </main>
   );

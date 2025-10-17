@@ -47,7 +47,7 @@ body {
 
   /* Focus + selection */
   --gr-focus: var(--gr-lime);
-  --gr-selection: color-mix(in srgb, var(--gr-primary) 15%, white);
+  --gr-selection: color-mix(in srgb, var(--gr-primary) 22%, white);
 }
 
 /* Buttons/links that use brand colors (optional helpers) */
@@ -73,8 +73,8 @@ body {
   --ag-foreground-color: var(--gr-ink);
   --ag-secondary-foreground-color: var(--gr-ink-muted);
   --ag-background-color: var(--gr-surface);
-  --ag-header-background-color: color-mix(in srgb, var(--gr-primary) 8%, white);
-  --ag-odd-row-background-color: color-mix(in srgb, var(--gr-grey-5) 6%, white);
+  --ag-header-background-color: color-mix(in srgb, var(--gr-primary) 14%, white);
+  --ag-odd-row-background-color: color-mix(in srgb, var(--gr-grey-5) 10%, white);
   --ag-borders: var(--gr-line);
 
   --ag-selected-row-background-color: var(--gr-selection);
