@@ -67,6 +67,17 @@ export default function CodingGridSwitcher() {
         style={frameStyle}
       >
         <div
+          style={{
+            color: "#000000",
+            fontWeight: 600,
+            fontSize: "1.235rem",
+            marginBottom: "8px",
+            textAlign: "center",
+          }}
+        >
+          {active === "tickets" ? "Tickets" : "Orders"}
+        </div>
+        <div
           ref={gridShellRef}
           className="flex-1 min-h-0 h-full w-full rounded-lg overflow-hidden"
           style={{
