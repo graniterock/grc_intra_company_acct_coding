@@ -67,7 +67,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         editable: true,
         resizable: true,
       },
-      { key: "TicketDate", name: "Date", width: 130, editable: true },
+      { key: "TicketDate", name: "Ticket Date", width: 130, editable: true },
       { key: "UOM", name: "UOM", width: 90, editable: true },
       {
         key: "QTY",

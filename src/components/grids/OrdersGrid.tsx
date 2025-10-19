@@ -59,8 +59,8 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
         editable: true,
         minWidth: 240,
       },
-      { key: "StartDate", name: "Start", minWidth: 150, editable: true },
-      { key: "EndDate", name: "End", minWidth: 150, editable: true },
+      { key: "StartDate", name: "Start Date", minWidth: 150, editable: true },
+      { key: "EndDate", name: "End Date", minWidth: 150, editable: true },
       {
         key: "OrderAcctCode",
         name: "Order AcctCode",
