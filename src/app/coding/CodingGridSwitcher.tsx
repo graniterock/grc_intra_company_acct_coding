@@ -37,12 +37,12 @@ export default function CodingGridSwitcher() {
         className={BUTTON_BASE}
         style={{
           backgroundColor: selected
-            ? "color-mix(in srgb, var(--gr-primary) 80%, white)"
-            : "rgba(255, 255, 255, 0.15)",
+            ? "var(--gr-lime)"
+            : "color-mix(in srgb, var(--gr-lime) 65%, white)",
           borderColor: selected
-            ? "var(--gr-primary)"
-            : "rgba(26, 26, 26, 0.2)",
-          color: selected ? "var(--gr-surface)" : "var(--gr-ink)",
+            ? "color-mix(in srgb, var(--gr-lime) 70%, black)"
+            : "color-mix(in srgb, var(--gr-lime) 45%, white)",
+          color: "#000000",
         }}
       >
         {label}
