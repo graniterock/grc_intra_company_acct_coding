@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 import TicketsGrid from "../../components/grids/TicketsGrid";
 import OrdersGrid from "../../components/grids/OrdersGrid";
@@ -35,14 +36,24 @@ export default function CodingGridSwitcher() {
         onClick={() => setActive(key)}
         className={BUTTON_BASE}
         style={{
-          backgroundColor: selected ? "var(--gr-primary)" : "transparent",
-          borderColor: selected ? "var(--gr-primary)" : "var(--gr-line)",
-          color: selected ? "var(--gr-background)" : "var(--gr-ink)",
+          backgroundColor: selected
+            ? "color-mix(in srgb, var(--gr-primary) 80%, white)"
+            : "rgba(255, 255, 255, 0.15)",
+          borderColor: selected
+            ? "var(--gr-primary)"
+            : "rgba(26, 26, 26, 0.2)",
+          color: selected ? "var(--gr-surface)" : "var(--gr-ink)",
         }}
       >
         {label}
       </button>
     );
+  };
+
+  const frameStyle: CSSProperties = {
+    backgroundColor: "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
+    padding: "16px",
+    "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
   };
 
   return (
@@ -51,12 +62,23 @@ export default function CodingGridSwitcher() {
         {renderButton("Tickets", "tickets")}
         {renderButton("Orders", "orders")}
       </div>
-      <div ref={gridShellRef} className="flex-1 min-h-0 h-full w-full">
-        {active === "tickets" ? (
-          <TicketsGrid height={gridHeight} />
-        ) : (
-          <OrdersGrid height={gridHeight} />
-        )}
+      <div
+        className="flex flex-col flex-1 min-h-0 h-full w-full rounded-xl shadow-md"
+        style={frameStyle}
+      >
+        <div
+          ref={gridShellRef}
+          className="flex-1 min-h-0 h-full w-full rounded-lg overflow-hidden"
+          style={{
+            backgroundColor: "var(--gr-surface)",
+          }}
+        >
+          {active === "tickets" ? (
+            <TicketsGrid height={gridHeight} />
+          ) : (
+            <OrdersGrid height={gridHeight} />
+          )}
+        </div>
       </div>
     </section>
   );
