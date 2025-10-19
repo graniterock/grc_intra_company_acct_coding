@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { DataGrid, Column } from "react-data-grid";
 import type { FillEvent } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
@@ -72,18 +73,51 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
         minWidth: 220,
         editable: true,
       },
-      { key: "ERF_AcctCode", name: "ERF AcctCode", minWidth: 170, editable: true },
-      { key: "MTX_AcctCode", name: "MTX AcctCode", minWidth: 170, editable: true },
+      {
+        key: "ERF_AcctCode",
+        name: "ERF AcctCode",
+        minWidth: 170,
+        editable: true,
+      },
+      {
+        key: "MTX_AcctCode",
+        name: "MTX AcctCode",
+        minWidth: 170,
+        editable: true,
+      },
       { key: "AcctCode", name: "Acct Code", minWidth: 160, editable: true },
-      { key: "PW_AcctCode", name: "PW AcctCode", minWidth: 170, editable: true },
-      { key: "LAS_AcctCode", name: "LAS AcctCode", minWidth: 170, editable: true },
-      { key: "FS_AcctCode", name: "FS AcctCode", minWidth: 170, editable: true },
+      {
+        key: "PW_AcctCode",
+        name: "PW AcctCode",
+        minWidth: 170,
+        editable: true,
+      },
+      {
+        key: "LAS_AcctCode",
+        name: "LAS AcctCode",
+        minWidth: 170,
+        editable: true,
+      },
+      {
+        key: "FS_AcctCode",
+        name: "FS AcctCode",
+        minWidth: 170,
+        editable: true,
+      },
     ],
     []
   );
 
   const resolvedHeight =
     typeof height === "number" ? `${height}px` : height;
+
+  const gridStyle: CSSProperties = {
+    height: "100%",
+    width: "100%",
+    "--rdg-header-background-color": "var(--gr-pistachio)",
+    "--rdg-header-draggable-background-color": "var(--gr-pistachio)",
+    "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
+  } as CSSProperties;
 
   return (
     <div
@@ -105,7 +139,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
             [columnKey]: event.sourceRow[columnKey],
           };
         }}
-        style={{ height: "100%", width: "100%" }}
+        style={gridStyle}
       />
     </div>
   );

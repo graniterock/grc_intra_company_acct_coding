@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { DataGrid, Column, RenderEditCellProps } from "react-data-grid";
 import type { FillEvent } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
@@ -90,6 +91,14 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const resolvedHeight =
     typeof height === "number" ? `${height}px` : height;
 
+  const gridStyle: CSSProperties = {
+    height: "100%",
+    width: "100%",
+    "--rdg-header-background-color": "var(--gr-pistachio)",
+    "--rdg-header-draggable-background-color": "var(--gr-pistachio)",
+    "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
+  } as CSSProperties;
+
   return (
     <div className="w-full" style={{ height: resolvedHeight, minHeight: 400 }}>
       <DataGrid<TicketRow>
@@ -105,7 +114,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             [columnKey]: event.sourceRow[columnKey],
           };
         }}
-        style={{ height: "100%", width: "100%" }}
+        style={gridStyle}
       />
     </div>
   );

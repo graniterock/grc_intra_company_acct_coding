@@ -94,10 +94,31 @@ body {
 /* React Data Grid - keep cells on a white surface with black text */
 .rdg {
   color: #000;
+  --rdg-background-color: var(--gr-surface);
+  --rdg-header-background-color: var(--gr-pistachio);
+  --rdg-header-draggable-background-color: var(--gr-pistachio);
+  --rdg-border-color: color-mix(in srgb, var(--gr-grey-5) 45%, white);
+  --rdg-row-hover-background-color: color-mix(in srgb, var(--gr-grey-5) 25%, white);
+  --rdg-row-selected-background-color: color-mix(
+    in srgb,
+    var(--gr-pistachio) 45%,
+    white
+  );
+  --rdg-row-selected-hover-background-color: color-mix(
+    in srgb,
+    var(--gr-pistachio) 55%,
+    white
+  );
 }
 
 .rdg,
 .rdg .rdg-row,
 .rdg .rdg-cell {
   background-color: var(--gr-surface);
+}
+
+.rdg .rdg-header-row .rdg-cell {
+  background-color: var(--gr-pistachio) !important;
+  color: var(--gr-ink);
+  font-weight: 600;
 }
