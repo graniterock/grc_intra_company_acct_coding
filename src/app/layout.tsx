@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -27,7 +28,18 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <div className="relative min-h-screen">
+          <div className="fixed top-4 right-4 z-50">
+            <Image
+              src="/transparent-grc-logo.png"
+              alt="Graniterock logo"
+              width={260}
+              height={92}
+              priority
+            />
+          </div>
+          {children}
+        </div>
       </body>
     </html>
   );
