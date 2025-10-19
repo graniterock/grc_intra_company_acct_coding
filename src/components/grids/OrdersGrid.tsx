@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { DataGrid, Column } from "react-data-grid";
-import type { FillEvent } from "react-data-grid";
+import type { FillEvent, RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 
 import type { OrderRow } from "../../types/grids";
+import type { FilterInputType } from "./HeaderFilter";
+import { HeaderFilter } from "./HeaderFilter";
 
 /* Seed rows */
 const initialRows: OrderRow[] = [
@@ -48,8 +50,9 @@ type OrdersGridProps = {
 
 export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
   const [rows, setRows] = useState<OrderRow[]>(initialRows);
+  const [filters, setFilters] = useState<Partial<Record<keyof OrderRow, string>>>({});
 
-  const columns = useMemo<ReadonlyArray<Column<OrderRow>>>(
+  const baseColumns = useMemo<ReadonlyArray<Column<OrderRow>>>(
     () => [
       { key: "OrderNumber", name: "Order #", minWidth: 140, editable: true },
       { key: "ProductCode", name: "Product", minWidth: 140, editable: true },
@@ -108,6 +111,44 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
     []
   );
 
+  const dateColumns = useMemo(
+    () => new Set<keyof OrderRow>(["StartDate", "EndDate"]),
+    []
+  );
+
+  const handleFilterChange = useCallback(
+    (key: keyof OrderRow, value: string) => {
+      setFilters((prev) => {
+        const next = { ...prev };
+        if (value) {
+          next[key] = value;
+        } else {
+          delete next[key];
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const columns = useMemo(() => {
+    return baseColumns.map((column) => {
+      const columnKey = column.key as keyof OrderRow;
+      const inputType: FilterInputType = dateColumns.has(columnKey) ? "date" : "text";
+      return {
+        ...column,
+        renderHeaderCell: () => (
+          <HeaderFilter
+            label={String(column.name)}
+            value={filters[columnKey] ?? ""}
+            type={inputType}
+            onChange={(value) => handleFilterChange(columnKey, value)}
+          />
+        ),
+      };
+    });
+  }, [baseColumns, dateColumns, filters, handleFilterChange]);
+
   const resolvedHeight =
     typeof height === "number" ? `${height}px` : height;
 
@@ -119,6 +160,54 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
   } as CSSProperties;
 
+  const filteredRows = useMemo(() => {
+    if (Object.keys(filters).length === 0) return rows;
+    return rows.filter((row) =>
+      (Object.entries(filters) as Array<[keyof OrderRow, string]>).every(
+        ([key, filterValue]) => {
+          if (!filterValue) return true;
+          const cellValue = row[key];
+          if (cellValue === undefined || cellValue === null) return false;
+
+          if (dateColumns.has(key)) {
+            return String(cellValue) === filterValue;
+          }
+
+          const candidate = String(cellValue).toLowerCase();
+          return candidate.includes(filterValue.toLowerCase());
+        }
+      )
+    );
+  }, [rows, filters, dateColumns]);
+
+  const rowKeyGetter = useCallback((row: OrderRow) => row.OrderNumber, []);
+
+  const handleRowsChange = useCallback(
+    (updatedRows: OrderRow[], data: RowsChangeData<OrderRow>) => {
+      const changedIndexes =
+        data.indexes && data.indexes.length > 0
+          ? data.indexes
+          : updatedRows.map((_, idx) => idx);
+      if (changedIndexes.length === 0) return;
+
+      setRows((prevRows) => {
+        const updatedMap = new Map(prevRows.map((row) => [rowKeyGetter(row), row]));
+
+        changedIndexes.forEach((idx) => {
+          const updatedRow = updatedRows[idx];
+          if (updatedRow) {
+            updatedMap.set(rowKeyGetter(updatedRow), updatedRow);
+          }
+        });
+
+        return prevRows.map(
+          (row) => updatedMap.get(rowKeyGetter(row)) ?? row
+        );
+      });
+    },
+    [rowKeyGetter]
+  );
+
   return (
     <div
       className="w-full"
@@ -127,9 +216,9 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
       {/* Note the 3rd generic: <OrderRow, unknown, string> */}
       <DataGrid<OrderRow, unknown, string>
         columns={columns}
-        rows={rows}
-        onRowsChange={setRows}
-        rowKeyGetter={(r: OrderRow) => r.OrderNumber}
+        rows={filteredRows}
+        onRowsChange={handleRowsChange}
+        rowKeyGetter={rowKeyGetter}
         defaultColumnOptions={{ resizable: true }}
         /* Drag-to-fill - produce a new row for the target */
         onFill={(event: FillEvent<OrderRow>) => {
@@ -139,6 +228,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
             [columnKey]: event.sourceRow[columnKey],
           };
         }}
+        headerRowHeight={64}
         style={gridStyle}
       />
     </div>

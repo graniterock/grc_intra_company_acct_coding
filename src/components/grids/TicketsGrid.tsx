@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { DataGrid, Column, RenderEditCellProps } from "react-data-grid";
-import type { FillEvent } from "react-data-grid";
+import type { FillEvent, RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
+import type { FilterInputType } from "./HeaderFilter";
+import { HeaderFilter } from "./HeaderFilter";
 
 /* Row shape for tickets */
 type TicketRow = {
@@ -54,8 +56,9 @@ type TicketsGridProps = {
 
 export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [rows, setRows] = useState<TicketRow[]>(initialRows);
+  const [filters, setFilters] = useState<Partial<Record<keyof TicketRow, string>>>({});
 
-  const columns = useMemo<ReadonlyArray<Column<TicketRow>>>(
+  const baseColumns = useMemo<ReadonlyArray<Column<TicketRow>>>(
     () => [
       { key: "TicketNo", name: "Ticket #", width: 120, editable: true },
       { key: "BranchNo", name: "Branch", width: 100, editable: true },
@@ -88,6 +91,49 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     []
   );
 
+  const dateColumns = useMemo(() => new Set<keyof TicketRow>(["TicketDate"]), []);
+  const numericColumns = useMemo(
+    () => new Set<keyof TicketRow>(["QTY", "UnitPrice"]),
+    []
+  );
+
+  const handleFilterChange = useCallback(
+    (key: keyof TicketRow, value: string) => {
+      setFilters((prev) => {
+        const next = { ...prev };
+        if (value) {
+          next[key] = value;
+        } else {
+          delete next[key];
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const columns = useMemo(() => {
+    return baseColumns.map((column) => {
+      const columnKey = column.key as keyof TicketRow;
+      const inputType: FilterInputType = dateColumns.has(columnKey)
+        ? "date"
+        : numericColumns.has(columnKey)
+        ? "number"
+        : "text";
+      return {
+        ...column,
+        renderHeaderCell: () => (
+          <HeaderFilter
+            label={String(column.name)}
+            value={filters[columnKey] ?? ""}
+            type={inputType}
+            onChange={(value) => handleFilterChange(columnKey, value)}
+          />
+        ),
+      };
+    });
+  }, [baseColumns, dateColumns, numericColumns, filters, handleFilterChange]);
+
   const resolvedHeight =
     typeof height === "number" ? `${height}px` : height;
 
@@ -99,13 +145,60 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
   } as CSSProperties;
 
+  const filteredRows = useMemo(() => {
+    if (Object.keys(filters).length === 0) return rows;
+    return rows.filter((row) =>
+      (Object.entries(filters) as Array<[keyof TicketRow, string]>).every(
+        ([key, filterValue]) => {
+          if (!filterValue) return true;
+          const cellValue = row[key];
+          if (cellValue === undefined || cellValue === null) return false;
+
+          if (dateColumns.has(key)) {
+            return String(cellValue) === filterValue;
+          }
+
+          const candidate = String(cellValue).toLowerCase();
+          return candidate.includes(filterValue.toLowerCase());
+        }
+      )
+    );
+  }, [rows, filters, dateColumns]);
+
+  const rowKeyGetter = useCallback((row: TicketRow) => row.TicketNo, []);
+
+  const handleRowsChange = useCallback(
+    (updatedRows: TicketRow[], data: RowsChangeData<TicketRow>) => {
+      const changedIndexes =
+        data.indexes && data.indexes.length > 0
+          ? data.indexes
+          : updatedRows.map((_, idx) => idx);
+      if (changedIndexes.length === 0) return;
+      setRows((prevRows) => {
+        const updatedMap = new Map(prevRows.map((row) => [rowKeyGetter(row), row]));
+
+        changedIndexes.forEach((idx) => {
+          const updatedRow = updatedRows[idx];
+          if (updatedRow) {
+            updatedMap.set(rowKeyGetter(updatedRow), updatedRow);
+          }
+        });
+
+        return prevRows.map(
+          (row) => updatedMap.get(rowKeyGetter(row)) ?? row
+        );
+      });
+    },
+    [rowKeyGetter]
+  );
+
   return (
     <div className="w-full" style={{ height: resolvedHeight, minHeight: 400 }}>
       <DataGrid<TicketRow>
         columns={columns}
-        rows={rows}
-        onRowsChange={setRows}
-        rowKeyGetter={(r: TicketRow) => r.TicketNo}
+        rows={filteredRows}
+        onRowsChange={handleRowsChange}
+        rowKeyGetter={rowKeyGetter}
         /* Drag-to-fill (TS-safe cast of RDG FillEvent) */
         onFill={(event: FillEvent<TicketRow>) => {
           const columnKey = event.columnKey as keyof TicketRow;
@@ -114,6 +207,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             [columnKey]: event.sourceRow[columnKey],
           };
         }}
+        headerRowHeight={64}
         style={gridStyle}
       />
     </div>
