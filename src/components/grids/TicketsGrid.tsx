@@ -8,7 +8,6 @@ import "react-data-grid/lib/styles.css";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
-import { DateEditor } from "./DateEditor";
 
 /* Row shape for tickets */
 type TicketRow = {
@@ -86,14 +85,13 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
 
   const baseColumns = useMemo<ReadonlyArray<Column<TicketRow>>>(
     () => [
-      { key: "TicketNo", name: "Ticket #", width: 120, editable: true },
-      { key: "BranchNo", name: "Branch", width: 100, editable: true },
-      { key: "OrderNumber", name: "Order #", width: 140, editable: true },
-      { key: "ProductCode", name: "Product", width: 120, editable: true },
+      { key: "TicketNo", name: "Ticket #", width: 120 },
+      { key: "BranchNo", name: "Branch", width: 100 },
+      { key: "OrderNumber", name: "Order #", width: 140 },
+      { key: "ProductCode", name: "Product", width: 120 },
       {
         key: "ProductDesc",
         name: "Description",
-        editable: true,
         resizable: true,
         width: 240,
         minWidth: 240,
@@ -102,23 +100,17 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         key: "TicketDate",
         name: "Ticket Date",
         width: 130,
-        editable: true,
-        renderEditCell: DateEditor<TicketRow>,
       },
-      { key: "UOM", name: "UOM", width: 90, editable: true },
+      { key: "UOM", name: "UOM", width: 90 },
       {
         key: "QTY",
         name: "Qty",
         width: 100,
-        editable: true,
-        renderEditCell: NumberEditor<TicketRow>,
       },
       {
         key: "UnitPrice",
         name: "Unit Price",
         width: 120,
-        editable: true,
-        renderEditCell: NumberEditor<TicketRow>,
       },
       {
         key: "AcctCode",
@@ -154,13 +146,12 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
 
   const rowKeyGetter = useCallback((row: TicketRow) => row.TicketNo, []);
 
-  const columnKeys = useMemo(
-    () => baseColumns.map((column) => String(column.key)),
-    [baseColumns]
-  );
-
   const handleCellValueDrop = useCallback(
     (source: DragLocation, target: DragLocation) => {
+      if (source.columnKey !== "AcctCode" || target.columnKey !== "AcctCode") {
+        return;
+      }
+
       setRows((prevRows) => {
         const sourceIndex = prevRows.findIndex(
           (row) => rowKeyGetter(row) === source.rowKey
@@ -173,15 +164,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           return prevRows;
         }
 
-        const sourceRow = prevRows[sourceIndex];
-        const sourceKey = source.columnKey as keyof TicketRow;
-        const sourceValue = sourceRow[sourceKey];
-
+        const sourceValue = prevRows[sourceIndex]?.AcctCode ?? "";
         const startRow = Math.min(sourceIndex, targetIndex);
         const endRow = Math.max(sourceIndex, targetIndex);
-        const startColumn = Math.min(source.columnIndex, target.columnIndex);
-        const endColumn = Math.max(source.columnIndex, target.columnIndex);
-        const columnsToUpdate = columnKeys.slice(startColumn, endColumn + 1);
 
         let didChange = false;
 
@@ -190,28 +175,15 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             return row;
           }
 
-          let nextRow = row;
+          if (row.AcctCode === sourceValue) {
+            return row;
+          }
 
-          columnsToUpdate.forEach((columnKey) => {
-            const typedKey = columnKey as keyof TicketRow;
-            const existingValue = row[typedKey];
-            const coercedValue = normalizeTicketValue(
-              sourceValue,
-              existingValue,
-              typedKey,
-              numericColumns
-            );
-
-            if (coercedValue !== existingValue) {
-              if (nextRow === row) {
-                nextRow = { ...row };
-              }
-              nextRow[typedKey] = coercedValue;
-              didChange = true;
-            }
-          });
-
-          return nextRow;
+          didChange = true;
+          return {
+            ...row,
+            AcctCode: sourceValue,
+          };
         });
 
         if (!didChange) {
@@ -221,7 +193,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         return nextRows;
       });
     },
-    [columnKeys, numericColumns, rowKeyGetter]
+    [rowKeyGetter]
   );
 
   const columns = useMemo(() => {
@@ -242,14 +214,19 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             onChange={(value) => handleFilterChange(columnKey, value)}
           />
         ),
-        renderCell: (cellProps) => (
-          <DraggableCell<TicketRow>
-            {...cellProps}
-            columnIndex={columnIndex}
-            rowKey={rowKeyGetter(cellProps.row)}
-            onDropValue={handleCellValueDrop}
-          />
-        ),
+        renderCell: (cellProps) => {
+          const allowDrag = columnKey === "AcctCode";
+          return (
+            <DraggableCell<TicketRow>
+              {...cellProps}
+              columnIndex={columnIndex}
+              rowKey={rowKeyGetter(cellProps.row)}
+              onDropValue={handleCellValueDrop}
+              canDrag={allowDrag}
+              canDrop={allowDrag}
+            />
+          );
+        },
       };
     });
   }, [
@@ -340,49 +317,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   );
 }
 
-/** Simple numeric editor: keeps prior value if input is NaN */
-function NumberEditor<R extends Record<string, unknown>>({
-  row,
-  column,
-  onRowChange,
-}: RenderEditCellProps<R>) {
-  const key = column.key as keyof R;
-  const val = row[key] as unknown as string | number | undefined;
-
-  const commit = (raw: string) => {
-    const n = Number.parseFloat(raw);
-    const fallbackValue = row[key] as R[typeof key];
-    const nextValue = Number.isFinite(n)
-      ? ((n as unknown) as R[typeof key])
-      : fallbackValue;
-
-    onRowChange(
-      {
-        ...row,
-        [key]: nextValue,
-      },
-      true
-    );
-  };
-
-  return (
-    <input
-      autoFocus
-      type="number"
-      value={val ?? ""}
-      onChange={(e) => commit(e.target.value)}
-      onBlur={(e) => commit(e.target.value)}
-      style={{
-        width: "100%",
-        height: "100%",
-        border: "none",
-        outline: "none",
-        padding: "0 8px",
-      }}
-    />
-  );
-}
-
 function TextEditor<R extends Record<string, unknown>>({
   row,
   column,
@@ -417,28 +351,4 @@ function TextEditor<R extends Record<string, unknown>>({
       }}
     />
   );
-}
-
-function normalizeTicketValue(
-  incoming: unknown,
-  currentValue: TicketRow[keyof TicketRow],
-  targetKey: keyof TicketRow,
-  numericColumns: Set<keyof TicketRow>
-): TicketRow[keyof TicketRow] {
-  if (numericColumns.has(targetKey)) {
-    const parsed =
-      typeof incoming === "number"
-        ? incoming
-        : Number.parseFloat(String(incoming));
-    if (Number.isFinite(parsed)) {
-      return parsed as TicketRow[keyof TicketRow];
-    }
-    return currentValue;
-  }
-
-  if (incoming == null) {
-    return currentValue;
-  }
-
-  return String(incoming) as TicketRow[keyof TicketRow];
 }

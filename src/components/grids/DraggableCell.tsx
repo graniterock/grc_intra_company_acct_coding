@@ -16,6 +16,8 @@ type DraggableCellProps<R> = RenderCellProps<R> & {
   columnIndex: number;
   onDropValue: (source: DragLocation, target: DragLocation) => void;
   renderValue?: (value: unknown) => ReactNode;
+  canDrag?: boolean;
+  canDrop?: boolean;
 };
 
 /**
@@ -30,11 +32,14 @@ export function DraggableCell<R>({
   columnIndex,
   onDropValue,
   renderValue,
+  canDrag = true,
+  canDrop = true,
 }: DraggableCellProps<R>) {
   const columnKey = String(column.key);
   const cellValue = (row as Record<string, unknown>)[columnKey];
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>) => {
+    if (!canDrag) return;
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(
       DRAG_MIME_TYPE,
@@ -48,13 +53,13 @@ export function DraggableCell<R>({
   };
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes(DRAG_MIME_TYPE)) return;
+    if (!canDrop || !event.dataTransfer.types.includes(DRAG_MIME_TYPE)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes(DRAG_MIME_TYPE)) return;
+    if (!canDrop || !event.dataTransfer.types.includes(DRAG_MIME_TYPE)) return;
     event.preventDefault();
 
     try {
@@ -77,12 +82,12 @@ export function DraggableCell<R>({
 
   return (
     <div
-      draggable
+      draggable={canDrag}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       className="rdg-draggable-cell"
-      title="Drag to copy this value into another cell"
+      title={canDrag ? "Drag to copy this value into another cell" : undefined}
     >
       {renderValue ? renderValue(cellValue) : formatValue(cellValue)}
     </div>
