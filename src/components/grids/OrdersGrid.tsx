@@ -9,6 +9,7 @@ import "react-data-grid/lib/styles.css";
 import type { OrderRow } from "../../types/grids";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
+import { DraggableCell, type DragLocation } from "./DraggableCell";
 
 /* Seed rows */
 const initialRows: OrderRow[] = [
@@ -41,6 +42,36 @@ const initialRows: OrderRow[] = [
     PW_AcctCode: "PW-410",
     LAS_AcctCode: "LAS-510",
     FS_AcctCode: "FS-610",
+  },
+  {
+    OrderNumber: "O-70003",
+    ProductCode: "RMX1",
+    ProductDesc: "Ready Mix 4000psi",
+    StartDate: "2025-09-20",
+    EndDate: "2025-12-20",
+    OrderAcctCode: "140-575-015",
+    FreightCodeByTon_AA: "AA-205",
+    ERF_AcctCode: "ERF-310",
+    MTX_AcctCode: "MTX-410",
+    AcctCode: "150-300-010",
+    PW_AcctCode: "PW-515",
+    LAS_AcctCode: "LAS-615",
+    FS_AcctCode: "FS-715",
+  },
+  {
+    OrderNumber: "O-70004",
+    ProductCode: "ASPH",
+    ProductDesc: "Hot Mix Asphalt",
+    StartDate: "2025-10-15",
+    EndDate: "2026-01-15",
+    OrderAcctCode: "140-590-030",
+    FreightCodeByTon_AA: "AA-240",
+    ERF_AcctCode: "ERF-420",
+    MTX_AcctCode: "MTX-520",
+    AcctCode: "160-410-022",
+    PW_AcctCode: "PW-620",
+    LAS_AcctCode: "LAS-720",
+    FS_AcctCode: "FS-820",
   },
 ];
 
@@ -131,8 +162,81 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
     []
   );
 
+  const rowKeyGetter = useCallback((row: OrderRow) => row.OrderNumber, []);
+
+  const columnKeys = useMemo(
+    () => baseColumns.map((column) => String(column.key)),
+    [baseColumns]
+  );
+
+  const handleCellValueDrop = useCallback(
+    (source: DragLocation, target: DragLocation) => {
+      setRows((prevRows) => {
+        const sourceIndex = prevRows.findIndex(
+          (row) => rowKeyGetter(row) === source.rowKey
+        );
+        const targetIndex = prevRows.findIndex(
+          (row) => rowKeyGetter(row) === target.rowKey
+        );
+
+        if (sourceIndex === -1 || targetIndex === -1) {
+          return prevRows;
+        }
+
+        const sourceRow = prevRows[sourceIndex];
+        const sourceKey = source.columnKey as keyof OrderRow;
+        const sourceValue = sourceRow[sourceKey];
+
+        if (sourceValue == null) {
+          return prevRows;
+        }
+
+        const normalizedValue = String(sourceValue);
+
+        const startRow = Math.min(sourceIndex, targetIndex);
+        const endRow = Math.max(sourceIndex, targetIndex);
+        const startColumn = Math.min(source.columnIndex, target.columnIndex);
+        const endColumn = Math.max(source.columnIndex, target.columnIndex);
+        const columnsToUpdate = columnKeys.slice(startColumn, endColumn + 1);
+
+        let didChange = false;
+
+        const nextRows = prevRows.map((row, rowIndex) => {
+          if (rowIndex < startRow || rowIndex > endRow) {
+            return row;
+          }
+
+          let nextRow = row;
+
+          columnsToUpdate.forEach((columnKey) => {
+            const typedKey = columnKey as keyof OrderRow;
+            const existingValue = row[typedKey];
+            const coercedValue = normalizedValue;
+
+            if (coercedValue !== existingValue) {
+              if (nextRow === row) {
+                nextRow = { ...row };
+              }
+              nextRow[typedKey] = coercedValue;
+              didChange = true;
+            }
+          });
+
+          return nextRow;
+        });
+
+        if (!didChange) {
+          return prevRows;
+        }
+
+        return nextRows;
+      });
+    },
+    [columnKeys, rowKeyGetter]
+  );
+
   const columns = useMemo(() => {
-    return baseColumns.map((column) => {
+    return baseColumns.map((column, columnIndex) => {
       const columnKey = column.key as keyof OrderRow;
       const inputType: FilterInputType = dateColumns.has(columnKey) ? "date" : "text";
       return {
@@ -145,9 +249,24 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
             onChange={(value) => handleFilterChange(columnKey, value)}
           />
         ),
+        renderCell: (cellProps) => (
+          <DraggableCell<OrderRow>
+            {...cellProps}
+            columnIndex={columnIndex}
+            rowKey={rowKeyGetter(cellProps.row)}
+            onDropValue={handleCellValueDrop}
+          />
+        ),
       };
     });
-  }, [baseColumns, dateColumns, filters, handleFilterChange]);
+  }, [
+    baseColumns,
+    dateColumns,
+    filters,
+    handleCellValueDrop,
+    handleFilterChange,
+    rowKeyGetter,
+  ]);
 
   const resolvedHeight =
     typeof height === "number" ? `${height}px` : height;
@@ -179,8 +298,6 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
       )
     );
   }, [rows, filters, dateColumns]);
-
-  const rowKeyGetter = useCallback((row: OrderRow) => row.OrderNumber, []);
 
   const handleRowsChange = useCallback(
     (updatedRows: OrderRow[], data: RowsChangeData<OrderRow>) => {

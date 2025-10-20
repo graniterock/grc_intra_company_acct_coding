@@ -7,6 +7,7 @@ import type { FillEvent, RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
+import { DraggableCell, type DragLocation } from "./DraggableCell";
 
 /* Row shape for tickets */
 type TicketRow = {
@@ -47,6 +48,30 @@ const initialRows: TicketRow[] = [
     QTY: 18.0,
     UnitPrice: 17.25,
     AcctCode: "140-555-001",
+  },
+  {
+    TicketNo: "T-10003",
+    BranchNo: "20",
+    OrderNumber: "O-60111",
+    ProductCode: "RMX1",
+    ProductDesc: "Ready Mix 4000psi",
+    TicketDate: "2025-10-12",
+    UOM: "CY",
+    QTY: 12.5,
+    UnitPrice: 145.0,
+    AcctCode: "150-120-004",
+  },
+  {
+    TicketNo: "T-10004",
+    BranchNo: "30",
+    OrderNumber: "O-70991",
+    ProductCode: "ASPH",
+    ProductDesc: "Hot Mix Asphalt",
+    TicketDate: "2025-10-13",
+    UOM: "TON",
+    QTY: 32.75,
+    UnitPrice: 82.4,
+    AcctCode: "160-220-018",
   },
 ];
 
@@ -112,8 +137,80 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     []
   );
 
+  const rowKeyGetter = useCallback((row: TicketRow) => row.TicketNo, []);
+
+  const columnKeys = useMemo(
+    () => baseColumns.map((column) => String(column.key)),
+    [baseColumns]
+  );
+
+  const handleCellValueDrop = useCallback(
+    (source: DragLocation, target: DragLocation) => {
+      setRows((prevRows) => {
+        const sourceIndex = prevRows.findIndex(
+          (row) => rowKeyGetter(row) === source.rowKey
+        );
+        const targetIndex = prevRows.findIndex(
+          (row) => rowKeyGetter(row) === target.rowKey
+        );
+
+        if (sourceIndex === -1 || targetIndex === -1) {
+          return prevRows;
+        }
+
+        const sourceRow = prevRows[sourceIndex];
+        const sourceKey = source.columnKey as keyof TicketRow;
+        const sourceValue = sourceRow[sourceKey];
+
+        const startRow = Math.min(sourceIndex, targetIndex);
+        const endRow = Math.max(sourceIndex, targetIndex);
+        const startColumn = Math.min(source.columnIndex, target.columnIndex);
+        const endColumn = Math.max(source.columnIndex, target.columnIndex);
+        const columnsToUpdate = columnKeys.slice(startColumn, endColumn + 1);
+
+        let didChange = false;
+
+        const nextRows = prevRows.map((row, rowIndex) => {
+          if (rowIndex < startRow || rowIndex > endRow) {
+            return row;
+          }
+
+          let nextRow = row;
+
+          columnsToUpdate.forEach((columnKey) => {
+            const typedKey = columnKey as keyof TicketRow;
+            const existingValue = row[typedKey];
+            const coercedValue = normalizeTicketValue(
+              sourceValue,
+              existingValue,
+              typedKey,
+              numericColumns
+            );
+
+            if (coercedValue !== existingValue) {
+              if (nextRow === row) {
+                nextRow = { ...row };
+              }
+              nextRow[typedKey] = coercedValue;
+              didChange = true;
+            }
+          });
+
+          return nextRow;
+        });
+
+        if (!didChange) {
+          return prevRows;
+        }
+
+        return nextRows;
+      });
+    },
+    [columnKeys, numericColumns, rowKeyGetter]
+  );
+
   const columns = useMemo(() => {
-    return baseColumns.map((column) => {
+    return baseColumns.map((column, columnIndex) => {
       const columnKey = column.key as keyof TicketRow;
       const inputType: FilterInputType = dateColumns.has(columnKey)
         ? "date"
@@ -130,9 +227,25 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             onChange={(value) => handleFilterChange(columnKey, value)}
           />
         ),
+        renderCell: (cellProps) => (
+          <DraggableCell<TicketRow>
+            {...cellProps}
+            columnIndex={columnIndex}
+            rowKey={rowKeyGetter(cellProps.row)}
+            onDropValue={handleCellValueDrop}
+          />
+        ),
       };
     });
-  }, [baseColumns, dateColumns, numericColumns, filters, handleFilterChange]);
+  }, [
+    baseColumns,
+    dateColumns,
+    filters,
+    handleCellValueDrop,
+    handleFilterChange,
+    numericColumns,
+    rowKeyGetter,
+  ]);
 
   const resolvedHeight =
     typeof height === "number" ? `${height}px` : height;
@@ -164,8 +277,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       )
     );
   }, [rows, filters, dateColumns]);
-
-  const rowKeyGetter = useCallback((row: TicketRow) => row.TicketNo, []);
 
   const handleRowsChange = useCallback(
     (updatedRows: TicketRow[], data: RowsChangeData<TicketRow>) => {
@@ -255,4 +366,28 @@ function NumberEditor<R extends Record<string, unknown>>({
       }}
     />
   );
+}
+
+function normalizeTicketValue(
+  incoming: unknown,
+  currentValue: TicketRow[keyof TicketRow],
+  targetKey: keyof TicketRow,
+  numericColumns: Set<keyof TicketRow>
+): TicketRow[keyof TicketRow] {
+  if (numericColumns.has(targetKey)) {
+    const parsed =
+      typeof incoming === "number"
+        ? incoming
+        : Number.parseFloat(String(incoming));
+    if (Number.isFinite(parsed)) {
+      return parsed as TicketRow[keyof TicketRow];
+    }
+    return currentValue;
+  }
+
+  if (incoming == null) {
+    return currentValue;
+  }
+
+  return String(incoming) as TicketRow[keyof TicketRow];
 }
