@@ -95,6 +95,8 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         name: "Description",
         editable: true,
         resizable: true,
+        width: 240,
+        minWidth: 240,
       },
       {
         key: "TicketDate",
@@ -118,7 +120,13 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         editable: true,
         renderEditCell: NumberEditor<TicketRow>,
       },
-      { key: "AcctCode", name: "Acct Code", width: 160, editable: true },
+      {
+        key: "AcctCode",
+        name: "Acct Code",
+        width: 160,
+        editable: true,
+        renderEditCell: TextEditor<TicketRow>,
+      },
     ],
     []
   );
@@ -364,6 +372,42 @@ function NumberEditor<R extends Record<string, unknown>>({
       value={val ?? ""}
       onChange={(e) => commit(e.target.value)}
       onBlur={(e) => commit(e.target.value)}
+      style={{
+        width: "100%",
+        height: "100%",
+        border: "none",
+        outline: "none",
+        padding: "0 8px",
+      }}
+    />
+  );
+}
+
+function TextEditor<R extends Record<string, unknown>>({
+  row,
+  column,
+  onRowChange,
+}: RenderEditCellProps<R>) {
+  const key = column.key as keyof R;
+  const val = row[key] as unknown as string | undefined;
+
+  const commit = (raw: string) => {
+    onRowChange(
+      {
+        ...row,
+        [key]: (raw as unknown) as R[typeof key],
+      },
+      true
+    );
+  };
+
+  return (
+    <input
+      autoFocus
+      type="text"
+      value={val ?? ""}
+      onChange={(event) => commit(event.target.value)}
+      onBlur={(event) => commit(event.target.value)}
       style={{
         width: "100%",
         height: "100%",
