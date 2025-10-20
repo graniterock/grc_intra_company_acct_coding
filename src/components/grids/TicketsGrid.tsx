@@ -8,6 +8,7 @@ import "react-data-grid/lib/styles.css";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
+import { DateEditor } from "./DateEditor";
 
 /* Row shape for tickets */
 type TicketRow = {
@@ -95,7 +96,13 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         editable: true,
         resizable: true,
       },
-      { key: "TicketDate", name: "Ticket Date", width: 130, editable: true },
+      {
+        key: "TicketDate",
+        name: "Ticket Date",
+        width: 130,
+        editable: true,
+        renderEditCell: DateEditor<TicketRow>,
+      },
       { key: "UOM", name: "UOM", width: 90, editable: true },
       {
         key: "QTY",

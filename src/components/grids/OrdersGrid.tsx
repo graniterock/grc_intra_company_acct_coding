@@ -10,6 +10,7 @@ import type { OrderRow } from "../../types/grids";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
+import { DateEditor } from "./DateEditor";
 
 /* Seed rows */
 const initialRows: OrderRow[] = [
@@ -93,8 +94,20 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
         editable: true,
         minWidth: 240,
       },
-      { key: "StartDate", name: "Start Date", minWidth: 150, editable: true },
-      { key: "EndDate", name: "End Date", minWidth: 150, editable: true },
+      {
+        key: "StartDate",
+        name: "Start Date",
+        minWidth: 150,
+        editable: true,
+        renderEditCell: DateEditor<OrderRow>,
+      },
+      {
+        key: "EndDate",
+        name: "End Date",
+        minWidth: 150,
+        editable: true,
+        renderEditCell: DateEditor<OrderRow>,
+      },
       {
         key: "OrderAcctCode",
         name: "Order AcctCode",
