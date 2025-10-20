@@ -224,9 +224,17 @@ function NumberEditor<R extends Record<string, unknown>>({
   const val = row[key] as unknown as string | number | undefined;
 
   const commit = (raw: string) => {
-    const n = parseFloat(raw);
+    const n = Number.parseFloat(raw);
+    const fallbackValue = row[key] as R[typeof key];
+    const nextValue = Number.isFinite(n)
+      ? ((n as unknown) as R[typeof key])
+      : fallbackValue;
+
     onRowChange(
-      { ...row, [key]: Number.isFinite(n) ? (n as any) : (val as any) },
+      {
+        ...row,
+        [key]: nextValue,
+      },
       true
     );
   };

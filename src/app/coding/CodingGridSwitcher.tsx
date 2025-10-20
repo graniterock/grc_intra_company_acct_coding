@@ -50,7 +50,7 @@ export default function CodingGridSwitcher() {
     );
   };
 
-  const frameStyle: CSSProperties = {
+  const frameStyle: CSSProperties & { ["--rdg-border-color"]?: string } = {
     backgroundColor: "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
     padding: "16px",
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
