@@ -132,13 +132,6 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
         renderEditCell: TextEditor<OrderRow>,
       },
       {
-        key: "AcctCode",
-        name: "Acct Code",
-        minWidth: 160,
-        editable: true,
-        renderEditCell: TextEditor<OrderRow>,
-      },
-      {
         key: "PW_AcctCode",
         name: "PW AcctCode",
         minWidth: 170,
@@ -192,7 +185,6 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
         "FreightCodeByTon_AA",
         "ERF_AcctCode",
         "MTX_AcctCode",
-        "AcctCode",
         "PW_AcctCode",
         "LAS_AcctCode",
         "FS_AcctCode",
