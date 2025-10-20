@@ -161,6 +161,33 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
     []
   );
 
+  const columnOptions = useMemo(() => {
+    const optionSets = new Map<keyof OrderRow, Set<string>>();
+
+    rows.forEach((row) => {
+      (Object.keys(row) as Array<keyof OrderRow>).forEach((key) => {
+        const cellValue = row[key];
+        if (cellValue === undefined || cellValue === null || cellValue === "") {
+          return;
+        }
+        const normalized = String(cellValue);
+        if (!optionSets.has(key)) {
+          optionSets.set(key, new Set());
+        }
+        optionSets.get(key)!.add(normalized);
+      });
+    });
+
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+    const optionsMap = new Map<keyof OrderRow, string[]>();
+
+    optionSets.forEach((set, key) => {
+      optionsMap.set(key, Array.from(set).sort(collator.compare));
+    });
+
+    return optionsMap;
+  }, [rows]);
+
   const handleFilterChange = useCallback(
     (key: keyof OrderRow, value: string) => {
       setFilters((prev) => {
@@ -264,6 +291,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
             label={String(column.name)}
             value={filters[columnKey] ?? ""}
             type={inputType}
+            options={columnOptions.get(columnKey)}
             onChange={(value) => handleFilterChange(columnKey, value)}
           />
         ),
@@ -282,6 +310,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
   }, [
     baseColumns,
     dateColumns,
+    columnOptions,
     editableColumns,
     filters,
     handleCellValueDrop,

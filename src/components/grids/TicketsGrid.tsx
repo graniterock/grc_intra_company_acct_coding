@@ -130,6 +130,33 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     []
   );
 
+  const columnOptions = useMemo(() => {
+    const optionSets = new Map<keyof TicketRow, Set<string>>();
+
+    rows.forEach((row) => {
+      (Object.keys(row) as Array<keyof TicketRow>).forEach((key) => {
+        const cellValue = row[key];
+        if (cellValue === undefined || cellValue === null || cellValue === "") {
+          return;
+        }
+        const normalized = String(cellValue);
+        if (!optionSets.has(key)) {
+          optionSets.set(key, new Set());
+        }
+        optionSets.get(key)!.add(normalized);
+      });
+    });
+
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+    const optionsMap = new Map<keyof TicketRow, string[]>();
+
+    optionSets.forEach((set, key) => {
+      optionsMap.set(key, Array.from(set).sort(collator.compare));
+    });
+
+    return optionsMap;
+  }, [rows]);
+
   const handleFilterChange = useCallback(
     (key: keyof TicketRow, value: string) => {
       setFilters((prev) => {
@@ -212,6 +239,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             label={String(column.name)}
             value={filters[columnKey] ?? ""}
             type={inputType}
+            options={columnOptions.get(columnKey)}
             onChange={(value) => handleFilterChange(columnKey, value)}
           />
         ),
@@ -233,6 +261,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   }, [
     baseColumns,
     dateColumns,
+    columnOptions,
     filters,
     handleCellValueDrop,
     handleFilterChange,
