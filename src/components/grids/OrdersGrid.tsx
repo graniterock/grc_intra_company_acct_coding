@@ -205,6 +205,31 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
 
   const rowKeyGetter = useCallback((row: OrderRow) => row.OrderNumber, []);
 
+  const filteredRows = useMemo(() => {
+    if (Object.keys(filters).length === 0) return rows;
+    return rows.filter((row) =>
+      (Object.entries(filters) as Array<[keyof OrderRow, string]>).every(
+        ([key, filterValue]) => {
+          if (!filterValue) return true;
+          const cellValue = row[key];
+          if (cellValue === undefined || cellValue === null) return false;
+
+          if (dateColumns.has(key)) {
+            return String(cellValue) === filterValue;
+          }
+
+          const candidate = String(cellValue).toLowerCase();
+          return candidate.includes(filterValue.toLowerCase());
+        }
+      )
+    );
+  }, [rows, filters, dateColumns]);
+
+  const visibleRowKeys = useMemo(
+    () => filteredRows.map((row) => rowKeyGetter(row)),
+    [filteredRows, rowKeyGetter]
+  );
+
   const editableColumns = useMemo(
     () =>
       new Set<keyof OrderRow>([
@@ -236,7 +261,15 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
           (row) => rowKeyGetter(row) === target.rowKey
         );
 
-        if (sourceIndex === -1 || targetIndex === -1) {
+        const sourceVisibleIndex = visibleRowKeys.indexOf(source.rowKey);
+        const targetVisibleIndex = visibleRowKeys.indexOf(target.rowKey);
+
+        if (
+          sourceIndex === -1 ||
+          targetIndex === -1 ||
+          sourceVisibleIndex === -1 ||
+          targetVisibleIndex === -1
+        ) {
           return prevRows;
         }
 
@@ -249,13 +282,17 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
 
         const normalizedValue = String(sourceValue);
 
-        const startRow = Math.min(sourceIndex, targetIndex);
-        const endRow = Math.max(sourceIndex, targetIndex);
+        const startVisible = Math.min(sourceVisibleIndex, targetVisibleIndex);
+        const endVisible = Math.max(sourceVisibleIndex, targetVisibleIndex);
+        const keysToUpdate = new Set(
+          visibleRowKeys.slice(startVisible, endVisible + 1)
+        );
 
         let didChange = false;
 
-        const nextRows = prevRows.map((row, rowIndex) => {
-          if (rowIndex < startRow || rowIndex > endRow) {
+        const nextRows = prevRows.map((row) => {
+          const key = rowKeyGetter(row);
+          if (!keysToUpdate.has(key)) {
             return row;
           }
 
@@ -277,7 +314,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
         return nextRows;
       });
     },
-    [editableColumns, rowKeyGetter]
+    [editableColumns, rowKeyGetter, visibleRowKeys]
   );
 
   const columns = useMemo(() => {
@@ -328,26 +365,6 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
     "--rdg-header-draggable-background-color": "var(--gr-pistachio)",
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
   } as CSSProperties;
-
-  const filteredRows = useMemo(() => {
-    if (Object.keys(filters).length === 0) return rows;
-    return rows.filter((row) =>
-      (Object.entries(filters) as Array<[keyof OrderRow, string]>).every(
-        ([key, filterValue]) => {
-          if (!filterValue) return true;
-          const cellValue = row[key];
-          if (cellValue === undefined || cellValue === null) return false;
-
-          if (dateColumns.has(key)) {
-            return String(cellValue) === filterValue;
-          }
-
-          const candidate = String(cellValue).toLowerCase();
-          return candidate.includes(filterValue.toLowerCase());
-        }
-      )
-    );
-  }, [rows, filters, dateColumns]);
 
   const handleRowsChange = useCallback(
     (updatedRows: OrderRow[], data: RowsChangeData<OrderRow>) => {

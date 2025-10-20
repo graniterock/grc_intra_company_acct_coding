@@ -157,6 +157,33 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     return optionsMap;
   }, [rows]);
 
+  const rowKeyGetter = useCallback((row: TicketRow) => row.TicketNo, []);
+
+  const filteredRows = useMemo(() => {
+    if (Object.keys(filters).length === 0) return rows;
+    return rows.filter((row) =>
+      (Object.entries(filters) as Array<[keyof TicketRow, string]>).every(
+        ([key, filterValue]) => {
+          if (!filterValue) return true;
+          const cellValue = row[key];
+          if (cellValue === undefined || cellValue === null) return false;
+
+          if (dateColumns.has(key)) {
+            return String(cellValue) === filterValue;
+          }
+
+          const candidate = String(cellValue).toLowerCase();
+          return candidate.includes(filterValue.toLowerCase());
+        }
+      )
+    );
+  }, [rows, filters, dateColumns]);
+
+  const visibleRowKeys = useMemo(
+    () => filteredRows.map((row) => rowKeyGetter(row)),
+    [filteredRows, rowKeyGetter]
+  );
+
   const handleFilterChange = useCallback(
     (key: keyof TicketRow, value: string) => {
       setFilters((prev) => {
@@ -172,8 +199,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     []
   );
 
-  const rowKeyGetter = useCallback((row: TicketRow) => row.TicketNo, []);
-
   const handleCellValueDrop = useCallback(
     (source: DragLocation, target: DragLocation) => {
       if (source.columnKey !== "AcctCode" || target.columnKey !== "AcctCode") {
@@ -188,18 +213,30 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           (row) => rowKeyGetter(row) === target.rowKey
         );
 
-        if (sourceIndex === -1 || targetIndex === -1) {
+        const sourceVisibleIndex = visibleRowKeys.indexOf(source.rowKey);
+        const targetVisibleIndex = visibleRowKeys.indexOf(target.rowKey);
+
+        if (
+          sourceIndex === -1 ||
+          targetIndex === -1 ||
+          sourceVisibleIndex === -1 ||
+          targetVisibleIndex === -1
+        ) {
           return prevRows;
         }
 
         const sourceValue = prevRows[sourceIndex]?.AcctCode ?? "";
-        const startRow = Math.min(sourceIndex, targetIndex);
-        const endRow = Math.max(sourceIndex, targetIndex);
+        const startVisible = Math.min(sourceVisibleIndex, targetVisibleIndex);
+        const endVisible = Math.max(sourceVisibleIndex, targetVisibleIndex);
+        const keysToUpdate = new Set(
+          visibleRowKeys.slice(startVisible, endVisible + 1)
+        );
 
         let didChange = false;
 
-        const nextRows = prevRows.map((row, rowIndex) => {
-          if (rowIndex < startRow || rowIndex > endRow) {
+        const nextRows = prevRows.map((row) => {
+          const key = rowKeyGetter(row);
+          if (!keysToUpdate.has(key)) {
             return row;
           }
 
@@ -221,7 +258,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         return nextRows;
       });
     },
-    [rowKeyGetter]
+    [rowKeyGetter, visibleRowKeys]
   );
 
   const columns = useMemo(() => {
@@ -279,26 +316,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     "--rdg-header-draggable-background-color": "var(--gr-pistachio)",
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
   } as CSSProperties;
-
-  const filteredRows = useMemo(() => {
-    if (Object.keys(filters).length === 0) return rows;
-    return rows.filter((row) =>
-      (Object.entries(filters) as Array<[keyof TicketRow, string]>).every(
-        ([key, filterValue]) => {
-          if (!filterValue) return true;
-          const cellValue = row[key];
-          if (cellValue === undefined || cellValue === null) return false;
-
-          if (dateColumns.has(key)) {
-            return String(cellValue) === filterValue;
-          }
-
-          const candidate = String(cellValue).toLowerCase();
-          return candidate.includes(filterValue.toLowerCase());
-        }
-      )
-    );
-  }, [rows, filters, dateColumns]);
 
   const handleRowsChange = useCallback(
     (updatedRows: TicketRow[], data: RowsChangeData<TicketRow>) => {
