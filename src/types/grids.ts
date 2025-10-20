@@ -13,6 +13,7 @@ export type TicketRow = {
 
 export type OrderRow = {
   OrderNumber: string;
+  BranchNo: string;
   ProductCode: string;
   ProductDesc: string;
   StartDate: string; // ISO yyyy-mm-dd

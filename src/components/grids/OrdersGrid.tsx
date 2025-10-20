@@ -16,6 +16,7 @@ import { TextEditor } from "./TextEditor";
 const initialRows: OrderRow[] = [
   {
     OrderNumber: "O-70001",
+    BranchNo: "10",
     ProductCode: "AG57",
     ProductDesc: "Aggregate 5/7",
     StartDate: "2025-10-01",
@@ -31,6 +32,7 @@ const initialRows: OrderRow[] = [
   },
   {
     OrderNumber: "O-70002",
+    BranchNo: "10",
     ProductCode: "AG34",
     ProductDesc: "Aggregate 3/4",
     StartDate: "2025-10-05",
@@ -46,6 +48,7 @@ const initialRows: OrderRow[] = [
   },
   {
     OrderNumber: "O-70003",
+    BranchNo: "20",
     ProductCode: "RMX1",
     ProductDesc: "Ready Mix 4000psi",
     StartDate: "2025-09-20",
@@ -61,6 +64,7 @@ const initialRows: OrderRow[] = [
   },
   {
     OrderNumber: "O-70004",
+    BranchNo: "30",
     ProductCode: "ASPH",
     ProductDesc: "Hot Mix Asphalt",
     StartDate: "2025-10-15",
@@ -87,6 +91,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
   const baseColumns = useMemo<ReadonlyArray<Column<OrderRow>>>(
     () => [
       { key: "OrderNumber", name: "Order #", minWidth: 140 },
+      { key: "BranchNo", name: "Branch", minWidth: 100 },
       { key: "ProductCode", name: "Product", minWidth: 140 },
       {
         key: "ProductDesc",
