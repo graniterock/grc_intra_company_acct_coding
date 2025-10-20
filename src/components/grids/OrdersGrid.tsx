@@ -10,7 +10,7 @@ import type { OrderRow } from "../../types/grids";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
-import { DateEditor } from "./DateEditor";
+import { TextEditor } from "./TextEditor";
 
 /* Seed rows */
 const initialRows: OrderRow[] = [
@@ -86,70 +86,78 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
 
   const baseColumns = useMemo<ReadonlyArray<Column<OrderRow>>>(
     () => [
-      { key: "OrderNumber", name: "Order #", minWidth: 140, editable: true },
-      { key: "ProductCode", name: "Product", minWidth: 140, editable: true },
+      { key: "OrderNumber", name: "Order #", minWidth: 140 },
+      { key: "ProductCode", name: "Product", minWidth: 140 },
       {
         key: "ProductDesc",
         name: "Description",
-        editable: true,
         minWidth: 240,
       },
       {
         key: "StartDate",
         name: "Start Date",
         minWidth: 150,
-        editable: true,
-        renderEditCell: DateEditor<OrderRow>,
       },
       {
         key: "EndDate",
         name: "End Date",
         minWidth: 150,
-        editable: true,
-        renderEditCell: DateEditor<OrderRow>,
       },
       {
         key: "OrderAcctCode",
         name: "Order AcctCode",
         minWidth: 200,
         editable: true,
+        renderEditCell: TextEditor<OrderRow>,
       },
       {
         key: "FreightCodeByTon_AA",
         name: "Freight Code By Ton (AA)",
         minWidth: 220,
         editable: true,
+        renderEditCell: TextEditor<OrderRow>,
       },
       {
         key: "ERF_AcctCode",
         name: "ERF AcctCode",
         minWidth: 170,
         editable: true,
+        renderEditCell: TextEditor<OrderRow>,
       },
       {
         key: "MTX_AcctCode",
         name: "MTX AcctCode",
         minWidth: 170,
         editable: true,
+        renderEditCell: TextEditor<OrderRow>,
       },
-      { key: "AcctCode", name: "Acct Code", minWidth: 160, editable: true },
+      {
+        key: "AcctCode",
+        name: "Acct Code",
+        minWidth: 160,
+        editable: true,
+        renderEditCell: TextEditor<OrderRow>,
+      },
       {
         key: "PW_AcctCode",
         name: "PW AcctCode",
         minWidth: 170,
         editable: true,
+        renderEditCell: TextEditor<OrderRow>,
       },
       {
         key: "LAS_AcctCode",
         name: "LAS AcctCode",
         minWidth: 170,
         editable: true,
+        renderEditCell: TextEditor<OrderRow>,
       },
       {
         key: "FS_AcctCode",
         name: "FS AcctCode",
         minWidth: 170,
         editable: true,
+        renderEditCell: TextEditor<OrderRow>,
       },
     ],
     []
@@ -177,13 +185,30 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
 
   const rowKeyGetter = useCallback((row: OrderRow) => row.OrderNumber, []);
 
-  const columnKeys = useMemo(
-    () => baseColumns.map((column) => String(column.key)),
-    [baseColumns]
+  const editableColumns = useMemo(
+    () =>
+      new Set<keyof OrderRow>([
+        "OrderAcctCode",
+        "FreightCodeByTon_AA",
+        "ERF_AcctCode",
+        "MTX_AcctCode",
+        "AcctCode",
+        "PW_AcctCode",
+        "LAS_AcctCode",
+        "FS_AcctCode",
+      ]),
+    []
   );
 
   const handleCellValueDrop = useCallback(
     (source: DragLocation, target: DragLocation) => {
+      if (
+        source.columnKey !== target.columnKey ||
+        !editableColumns.has(source.columnKey as keyof OrderRow)
+      ) {
+        return;
+      }
+
       setRows((prevRows) => {
         const sourceIndex = prevRows.findIndex(
           (row) => rowKeyGetter(row) === source.rowKey
@@ -196,9 +221,8 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
           return prevRows;
         }
 
-        const sourceRow = prevRows[sourceIndex];
-        const sourceKey = source.columnKey as keyof OrderRow;
-        const sourceValue = sourceRow[sourceKey];
+        const columnKey = source.columnKey as keyof OrderRow;
+        const sourceValue = prevRows[sourceIndex]?.[columnKey];
 
         if (sourceValue == null) {
           return prevRows;
@@ -208,9 +232,6 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
 
         const startRow = Math.min(sourceIndex, targetIndex);
         const endRow = Math.max(sourceIndex, targetIndex);
-        const startColumn = Math.min(source.columnIndex, target.columnIndex);
-        const endColumn = Math.max(source.columnIndex, target.columnIndex);
-        const columnsToUpdate = columnKeys.slice(startColumn, endColumn + 1);
 
         let didChange = false;
 
@@ -219,23 +240,15 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
             return row;
           }
 
-          let nextRow = row;
+          if (row[columnKey] === normalizedValue) {
+            return row;
+          }
 
-          columnsToUpdate.forEach((columnKey) => {
-            const typedKey = columnKey as keyof OrderRow;
-            const existingValue = row[typedKey];
-            const coercedValue = normalizedValue;
-
-            if (coercedValue !== existingValue) {
-              if (nextRow === row) {
-                nextRow = { ...row };
-              }
-              nextRow[typedKey] = coercedValue;
-              didChange = true;
-            }
-          });
-
-          return nextRow;
+          didChange = true;
+          return {
+            ...row,
+            [columnKey]: normalizedValue,
+          };
         });
 
         if (!didChange) {
@@ -245,7 +258,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
         return nextRows;
       });
     },
-    [columnKeys, rowKeyGetter]
+    [editableColumns, rowKeyGetter]
   );
 
   const columns = useMemo(() => {
@@ -268,6 +281,8 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
             columnIndex={columnIndex}
             rowKey={rowKeyGetter(cellProps.row)}
             onDropValue={handleCellValueDrop}
+            canDrag={editableColumns.has(columnKey)}
+            canDrop={editableColumns.has(columnKey)}
           />
         ),
       };
@@ -275,6 +290,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
   }, [
     baseColumns,
     dateColumns,
+    editableColumns,
     filters,
     handleCellValueDrop,
     handleFilterChange,

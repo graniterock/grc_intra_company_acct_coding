@@ -2,12 +2,13 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { DataGrid, Column, RenderEditCellProps } from "react-data-grid";
+import { DataGrid, Column } from "react-data-grid";
 import type { FillEvent, RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
+import { TextEditor } from "./TextEditor";
 
 /* Row shape for tickets */
 type TicketRow = {
