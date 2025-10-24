@@ -14,6 +14,8 @@ import { TextEditor } from "./TextEditor";
 type TicketRow = {
   TicketNo: string;
   BranchNo: string;
+  JobNumber: string;
+  CustomerNumber: string;
   OrderNumber: string;
   ProductCode: string;
   ProductDesc: string;
@@ -29,6 +31,8 @@ const initialRows: TicketRow[] = [
   {
     TicketNo: "T-10001",
     BranchNo: "10",
+    JobNumber: "J-90001",
+    CustomerNumber: "C-30001",
     OrderNumber: "O-50123",
     ProductCode: "AG57",
     ProductDesc: "Aggregate 5/7",
@@ -41,6 +45,8 @@ const initialRows: TicketRow[] = [
   {
     TicketNo: "T-10002",
     BranchNo: "10",
+    JobNumber: "J-90002",
+    CustomerNumber: "C-30002",
     OrderNumber: "O-50123",
     ProductCode: "AG34",
     ProductDesc: "Aggregate 3/4",
@@ -53,6 +59,8 @@ const initialRows: TicketRow[] = [
   {
     TicketNo: "T-10003",
     BranchNo: "20",
+    JobNumber: "J-91001",
+    CustomerNumber: "C-31001",
     OrderNumber: "O-60111",
     ProductCode: "RMX1",
     ProductDesc: "Ready Mix 4000psi",
@@ -65,6 +73,8 @@ const initialRows: TicketRow[] = [
   {
     TicketNo: "T-10004",
     BranchNo: "30",
+    JobNumber: "J-92015",
+    CustomerNumber: "C-32015",
     OrderNumber: "O-70991",
     ProductCode: "ASPH",
     ProductDesc: "Hot Mix Asphalt",
@@ -88,6 +98,8 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     () => [
       { key: "TicketNo", name: "Ticket #", width: 120 },
       { key: "BranchNo", name: "Branch", width: 100 },
+      { key: "JobNumber", name: "Job #", width: 140 },
+      { key: "CustomerNumber", name: "Customer #", width: 140 },
       { key: "OrderNumber", name: "Order #", width: 140 },
       { key: "ProductCode", name: "Product", width: 120 },
       {
@@ -96,6 +108,13 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         resizable: true,
         width: 240,
         minWidth: 240,
+      },
+      {
+        key: "AcctCode",
+        name: "Acct Code",
+        width: 160,
+        editable: true,
+        renderEditCell: TextEditor<TicketRow>,
       },
       {
         key: "TicketDate",
@@ -112,13 +131,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         key: "UnitPrice",
         name: "Unit Price",
         width: 120,
-      },
-      {
-        key: "AcctCode",
-        name: "Acct Code",
-        width: 160,
-        editable: true,
-        renderEditCell: TextEditor<TicketRow>,
       },
     ],
     []

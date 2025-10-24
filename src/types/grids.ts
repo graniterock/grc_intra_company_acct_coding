@@ -1,6 +1,8 @@
 export type TicketRow = {
   TicketNo: string;
   BranchNo: string;
+  JobNumber: string;
+  CustomerNumber: string;
   OrderNumber: string;
   ProductCode: string;
   ProductDesc: string;
@@ -13,6 +15,8 @@ export type TicketRow = {
 
 export type OrderRow = {
   OrderNumber: string;
+  CustomerNumber: string;
+  JobNumber: string;
   BranchNo: string;
   ProductCode: string;
   ProductDesc: string;
