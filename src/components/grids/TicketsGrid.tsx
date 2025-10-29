@@ -472,18 +472,24 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
 
       if (!response.ok) {
         const text = await response.text();
-        let message = text.trim();
-        if (message) {
+        const trimmed = text.trim();
+        const statusNote = `Request failed (${response.status}${
+          response.statusText ? ` ${response.statusText}` : ""
+        })`;
+        let message = statusNote;
+        if (trimmed) {
           try {
-            const parsed = JSON.parse(message) as { error?: string };
+            const parsed = JSON.parse(trimmed) as { error?: string };
             if (parsed?.error) {
-              message = parsed.error;
+              message = `${statusNote}: ${parsed.error}`;
             }
           } catch {
-            // ignore JSON parse failures and fall back to raw text
+            if (!/^<!doctype html/i.test(trimmed) && !/^<html/i.test(trimmed)) {
+              message = `${statusNote}: ${trimmed}`;
+            }
           }
         }
-        throw new Error(message || "Request failed");
+        throw new Error(message);
       }
 
       const data = (await response.json()) as {
