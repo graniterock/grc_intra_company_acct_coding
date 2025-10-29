@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { DataGrid, Column } from "react-data-grid";
+import { DataGrid, type Column, type SortColumn } from "react-data-grid";
 import type { FillEvent, RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 
@@ -95,6 +95,12 @@ type OrdersGridProps = {
 export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
   const [rows, setRows] = useState<OrderRow[]>(initialRows);
   const [filters, setFilters] = useState<Partial<Record<keyof OrderRow, string>>>({});
+  const [sortColumns, setSortColumns] = useState<SortColumn[]>([]);
+
+  const collator = useMemo(
+    () => new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }),
+    []
+  );
 
   const baseColumns = useMemo<ReadonlyArray<Column<OrderRow>>>(
     () => [
@@ -177,31 +183,50 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
   );
 
   const columnOptions = useMemo(() => {
-    const optionSets = new Map<keyof OrderRow, Set<string>>();
+    const filterEntries = (Object.entries(filters) as Array<[keyof OrderRow, string]>).filter(
+      ([, value]) => Boolean(value)
+    );
 
-    rows.forEach((row) => {
-      (Object.keys(row) as Array<keyof OrderRow>).forEach((key) => {
-        const cellValue = row[key];
-        if (cellValue === undefined || cellValue === null || cellValue === "") {
-          return;
-        }
-        const normalized = String(cellValue);
-        if (!optionSets.has(key)) {
-          optionSets.set(key, new Set());
-        }
-        optionSets.get(key)!.add(normalized);
-      });
-    });
+    const matchesFilter = (
+      row: OrderRow,
+      key: keyof OrderRow,
+      filterValue: string
+    ): boolean => {
+      const cellValue = row[key];
+      if (cellValue === undefined || cellValue === null) return false;
 
-    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+      if (dateColumns.has(key)) {
+        return String(cellValue) === filterValue;
+      }
+
+      const candidate = String(cellValue).toLowerCase();
+      return candidate.includes(filterValue.toLowerCase());
+    };
+
     const optionsMap = new Map<keyof OrderRow, string[]>();
 
-    optionSets.forEach((set, key) => {
-      optionsMap.set(key, Array.from(set).sort(collator.compare));
+    baseColumns.forEach((column) => {
+      const columnKey = column.key as keyof OrderRow;
+      const otherFilters = filterEntries.filter(([key]) => key !== columnKey);
+      const relevantRows =
+        otherFilters.length === 0
+          ? rows
+          : rows.filter((row) =>
+              otherFilters.every(([key, filterValue]) => matchesFilter(row, key, filterValue))
+            );
+
+      const valueSet = new Set<string>();
+      relevantRows.forEach((row) => {
+        const value = row[columnKey];
+        if (value === undefined || value === null || value === "") return;
+        valueSet.add(String(value));
+      });
+
+      optionsMap.set(columnKey, Array.from(valueSet).sort(collator.compare));
     });
 
     return optionsMap;
-  }, [rows]);
+  }, [rows, filters, dateColumns, collator, baseColumns]);
 
   const handleFilterChange = useCallback(
     (key: keyof OrderRow, value: string) => {
@@ -240,9 +265,68 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
     );
   }, [rows, filters, dateColumns]);
 
+  const sortedRows = useMemo(() => {
+    if (sortColumns.length === 0) return filteredRows;
+    return [...filteredRows].sort((a, b) => {
+      for (const sort of sortColumns) {
+        const columnKey = sort.columnKey as keyof OrderRow;
+        const directionMultiplier = sort.direction === "ASC" ? 1 : -1;
+        const aValue = a[columnKey];
+        const bValue = b[columnKey];
+
+        if (aValue === bValue) continue;
+
+        if (aValue === null || aValue === undefined) {
+          return -1 * directionMultiplier;
+        }
+        if (bValue === null || bValue === undefined) {
+          return 1 * directionMultiplier;
+        }
+
+        let comparison: number;
+        if (typeof aValue === "number" && typeof bValue === "number") {
+          comparison = aValue - bValue;
+        } else {
+          comparison = collator.compare(String(aValue), String(bValue));
+        }
+
+        if (comparison !== 0) {
+          return comparison * directionMultiplier;
+        }
+      }
+      return 0;
+    });
+  }, [filteredRows, sortColumns, collator]);
+
   const visibleRowKeys = useMemo(
-    () => filteredRows.map((row) => rowKeyGetter(row)),
-    [filteredRows, rowKeyGetter]
+    () => sortedRows.map((row) => rowKeyGetter(row)),
+    [sortedRows, rowKeyGetter]
+  );
+
+  const toggleSortColumn = useCallback(
+    (columnKey: keyof OrderRow, shiftKey: boolean) => {
+      setSortColumns((prev) => {
+        const current = prev.find((entry) => entry.columnKey === columnKey);
+        const currentDirection = current?.direction;
+        const nextDirection =
+          currentDirection === "ASC" ? "DESC" : currentDirection === "DESC" ? undefined : "ASC";
+
+        if (shiftKey) {
+          const remaining = prev.filter((entry) => entry.columnKey !== columnKey);
+          if (!nextDirection) {
+            return remaining;
+          }
+          return [...remaining, { columnKey, direction: nextDirection }];
+        }
+
+        if (!nextDirection) {
+          return [];
+        }
+
+        return [{ columnKey, direction: nextDirection }];
+      });
+    },
+    []
   );
 
   const editableColumns = useMemo(
@@ -336,8 +420,10 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
     return baseColumns.map((column, columnIndex) => {
       const columnKey = column.key as keyof OrderRow;
       const inputType: FilterInputType = dateColumns.has(columnKey) ? "date" : "text";
+      const sortEntry = sortColumns.find((entry) => entry.columnKey === columnKey);
       return {
         ...column,
+        sortable: false,
         renderHeaderCell: () => (
           <HeaderFilter
             label={String(column.name)}
@@ -345,6 +431,8 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
             type={inputType}
             options={columnOptions.get(columnKey)}
             onChange={(value) => handleFilterChange(columnKey, value)}
+            onLabelClick={(event) => toggleSortColumn(columnKey, event.shiftKey)}
+            sortDirection={sortEntry?.direction ?? null}
           />
         ),
         renderCell: (cellProps) => (
@@ -368,6 +456,8 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
     handleCellValueDrop,
     handleFilterChange,
     rowKeyGetter,
+    sortColumns,
+    toggleSortColumn,
   ]);
 
   const resolvedHeight =
@@ -415,9 +505,11 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
       {/* Note the 3rd generic: <OrderRow, unknown, string> */}
       <DataGrid<OrderRow, unknown, string>
         columns={columns}
-        rows={filteredRows}
+        rows={sortedRows}
         onRowsChange={handleRowsChange}
         rowKeyGetter={rowKeyGetter}
+        sortColumns={sortColumns}
+        onSortColumnsChange={setSortColumns}
         defaultColumnOptions={{ resizable: true }}
         /* Drag-to-fill - produce a new row for the target */
         onFill={(event: FillEvent<OrderRow>) => {
