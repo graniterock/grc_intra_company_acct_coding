@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { DataGrid, Column } from "react-data-grid";
+import { DataGrid, type Column, type SortColumn } from "react-data-grid";
 import type { FillEvent, RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 import type { FilterInputType } from "./HeaderFilter";
@@ -10,104 +10,124 @@ import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
 import { TextEditor } from "./TextEditor";
 
-/* Row shape for tickets */
 type TicketRow = {
+  id: string;
   TicketNo: string;
-  BranchNo: string;
+  LocationID: string;
   JobNumber: string;
-  CustomerNumber: string;
-  OrderNumber: string;
-  ProductCode: string;
-  ProductDesc: string;
+  CustomerID: string;
+  OrderID: string;
+  ProductID: string;
+  Description: string;
   TicketDate: string;
-  UOM: string;
-  QTY: number;
-  UnitPrice: number;
+  Unit: string;
+  Qty: number | null;
+  UnitPrice: number | null;
+  JobName: string;
   AcctCode: string;
 };
 
-/* Seed rows */
-const initialRows: TicketRow[] = [
-  {
-    TicketNo: "T-10001",
-    BranchNo: "10",
-    JobNumber: "J-90001",
-    CustomerNumber: "C-30001",
-    OrderNumber: "O-50123",
-    ProductCode: "AG57",
-    ProductDesc: "Aggregate 5/7",
-    TicketDate: "2025-10-10",
-    UOM: "TON",
-    QTY: 24.5,
-    UnitPrice: 18.75,
-    AcctCode: "140-555-001",
-  },
-  {
-    TicketNo: "T-10002",
-    BranchNo: "10",
-    JobNumber: "J-90002",
-    CustomerNumber: "C-30002",
-    OrderNumber: "O-50123",
-    ProductCode: "AG34",
-    ProductDesc: "Aggregate 3/4",
-    TicketDate: "2025-10-11",
-    UOM: "TON",
-    QTY: 18.0,
-    UnitPrice: 17.25,
-    AcctCode: "140-555-001",
-  },
-  {
-    TicketNo: "T-10003",
-    BranchNo: "20",
-    JobNumber: "J-91001",
-    CustomerNumber: "C-31001",
-    OrderNumber: "O-60111",
-    ProductCode: "RMX1",
-    ProductDesc: "Ready Mix 4000psi",
-    TicketDate: "2025-10-12",
-    UOM: "CY",
-    QTY: 12.5,
-    UnitPrice: 145.0,
-    AcctCode: "150-120-004",
-  },
-  {
-    TicketNo: "T-10004",
-    BranchNo: "30",
-    JobNumber: "J-92015",
-    CustomerNumber: "C-32015",
-    OrderNumber: "O-70991",
-    ProductCode: "ASPH",
-    ProductDesc: "Hot Mix Asphalt",
-    TicketDate: "2025-10-13",
-    UOM: "TON",
-    QTY: 32.75,
-    UnitPrice: 82.4,
-    AcctCode: "160-220-018",
-  },
-];
+type TicketRowField = Exclude<keyof TicketRow, "id">;
+
+type TicketApiRow = {
+  TicketNo: string | number | null;
+  LocationID: string | number | null;
+  JobNumber: string | null;
+  CustomerID: string | number | null;
+  OrderID: string | number | null;
+  ProductID: string | number | null;
+  Description: string | null;
+  TicketDate: string | Date | null;
+  Unit: string | null;
+  Qty: number | string | null;
+  UnitPrice: number | string | null;
+  JobName: string | null;
+};
 
 type TicketsGridProps = {
   height?: number | string;
 };
 
-export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
-  const [rows, setRows] = useState<TicketRow[]>(initialRows);
-  const [filters, setFilters] = useState<Partial<Record<keyof TicketRow, string>>>({});
+const formatDate = (value: TicketApiRow["TicketDate"]): string => {
+  if (!value) return "";
+  const candidate =
+    value instanceof Date ? value : new Date(typeof value === "string" ? value : String(value));
+  if (Number.isNaN(candidate.getTime())) return "";
+  return candidate.toISOString().slice(0, 10);
+};
 
-  const baseColumns = useMemo<ReadonlyArray<Column<TicketRow>>>(
-    () => [
-      { key: "TicketNo", name: "Ticket #", width: 120 },
-      { key: "BranchNo", name: "Branch", width: 100 },
-      { key: "JobNumber", name: "Job #", width: 140 },
-      { key: "CustomerNumber", name: "Customer #", width: 140 },
-      { key: "OrderNumber", name: "Order #", width: 140 },
-      { key: "ProductCode", name: "Product", width: 120 },
+const asString = (value: string | number | null | undefined): string => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+};
+
+const asNumber = (value: number | string | null | undefined): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") {
+    return Number.isNaN(value) ? null : value;
+  }
+  const parsed = Number.parseFloat(value);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
+  const ticketNo = asString(record.TicketNo);
+  return {
+    id: `${ticketNo || "ticket"}-${index}`,
+    TicketNo: ticketNo,
+    LocationID: asString(record.LocationID),
+    JobNumber: asString(record.JobNumber),
+    CustomerID: asString(record.CustomerID),
+    OrderID: asString(record.OrderID),
+    ProductID: asString(record.ProductID),
+    Description: asString(record.Description),
+    TicketDate: formatDate(record.TicketDate),
+    Unit: asString(record.Unit),
+    Qty: asNumber(record.Qty),
+    UnitPrice: asNumber(record.UnitPrice),
+    JobName: asString(record.JobName),
+    AcctCode: "",
+  };
+};
+
+export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
+  const [rows, setRows] = useState<TicketRow[]>([]);
+  const [filters, setFilters] = useState<Partial<Record<TicketRowField, string>>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [sortColumns, setSortColumns] = useState<SortColumn[]>([]);
+
+  const collator = useMemo(
+    () => new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }),
+    []
+  );
+
+  const baseColumns = useMemo<ReadonlyArray<Column<TicketRow>>>(() => {
+    return [
+      { key: "TicketNo", name: "Ticket #", width: 140, resizable: true },
+      { key: "LocationID", name: "Location", width: 108 },
+      { key: "JobNumber", name: "Job #", width: 124 },
       {
-        key: "ProductDesc",
+        key: "JobName",
+        name: "Job Name",
+        width: 220,
+        minWidth: 200,
+        resizable: true,
+      },
+      { key: "CustomerID", name: "Customer #", width: 140 },
+      { key: "OrderID", name: "Order #", width: 140 },
+      { key: "ProductID", name: "Product #", width: 140 },
+      {
+        key: "Description",
         name: "Description",
         resizable: true,
-        width: 240,
-        minWidth: 240,
+        width: 260,
+        minWidth: 220,
+      },
+      {
+        key: "TicketDate",
+        name: "Ticket Date",
+        width: 130,
       },
       {
         key: "AcctCode",
@@ -116,65 +136,82 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         editable: true,
         renderEditCell: TextEditor<TicketRow>,
       },
+      { key: "Unit", name: "Unit", width: 90 },
       {
-        key: "TicketDate",
-        name: "Ticket Date",
-        width: 130,
-      },
-      { key: "UOM", name: "UOM", width: 90 },
-      {
-        key: "QTY",
+        key: "Qty",
         name: "Qty",
-        width: 100,
+        width: 80,
       },
       {
         key: "UnitPrice",
         name: "Unit Price",
         width: 120,
       },
-    ],
+    ];
+  }, []);
+
+  const dateColumns = useMemo(() => new Set<TicketRowField>(["TicketDate"]), []);
+  const numericColumns = useMemo(
+    () => new Set<TicketRowField>(["Qty", "UnitPrice"]),
     []
   );
-
-  const dateColumns = useMemo(() => new Set<keyof TicketRow>(["TicketDate"]), []);
-  const numericColumns = useMemo(
-    () => new Set<keyof TicketRow>(["QTY", "UnitPrice"]),
-    []
+  const columnKeys = useMemo(
+    () => baseColumns.map((column) => column.key as TicketRowField),
+    [baseColumns]
   );
 
   const columnOptions = useMemo(() => {
-    const optionSets = new Map<keyof TicketRow, Set<string>>();
+    const filterEntries = (Object.entries(filters) as Array<[TicketRowField, string]>).filter(
+      ([, value]) => Boolean(value)
+    );
 
-    rows.forEach((row) => {
-      (Object.keys(row) as Array<keyof TicketRow>).forEach((key) => {
-        const cellValue = row[key];
-        if (cellValue === undefined || cellValue === null || cellValue === "") {
-          return;
-        }
-        const normalized = String(cellValue);
-        if (!optionSets.has(key)) {
-          optionSets.set(key, new Set());
-        }
-        optionSets.get(key)!.add(normalized);
+    const matchesFilter = (
+      row: TicketRow,
+      key: TicketRowField,
+      filterValue: string
+    ): boolean => {
+      const cellValue = row[key];
+      if (cellValue === undefined || cellValue === null) return false;
+
+      if (dateColumns.has(key)) {
+        return String(cellValue) === filterValue;
+      }
+
+      const candidate = String(cellValue).toLowerCase();
+      return candidate.includes(filterValue.toLowerCase());
+    };
+
+    const optionsMap = new Map<TicketRowField, string[]>();
+
+    columnKeys.forEach((columnKey) => {
+      const otherFilters = filterEntries.filter(([key]) => key !== columnKey);
+
+      const relevantRows =
+        otherFilters.length === 0
+          ? rows
+          : rows.filter((row) =>
+              otherFilters.every(([key, filterValue]) => matchesFilter(row, key, filterValue))
+            );
+
+      const valueSet = new Set<string>();
+      relevantRows.forEach((row) => {
+        const value = row[columnKey];
+        if (value === undefined || value === null || value === "") return;
+        valueSet.add(String(value));
       });
-    });
 
-    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-    const optionsMap = new Map<keyof TicketRow, string[]>();
-
-    optionSets.forEach((set, key) => {
-      optionsMap.set(key, Array.from(set).sort(collator.compare));
+      optionsMap.set(columnKey, Array.from(valueSet).sort(collator.compare));
     });
 
     return optionsMap;
-  }, [rows]);
+  }, [rows, columnKeys, filters, dateColumns, collator]);
 
-  const rowKeyGetter = useCallback((row: TicketRow) => row.TicketNo, []);
+  const rowKeyGetter = useCallback((row: TicketRow) => row.id, []);
 
   const filteredRows = useMemo(() => {
     if (Object.keys(filters).length === 0) return rows;
     return rows.filter((row) =>
-      (Object.entries(filters) as Array<[keyof TicketRow, string]>).every(
+      (Object.entries(filters) as Array<[TicketRowField, string]>).every(
         ([key, filterValue]) => {
           if (!filterValue) return true;
           const cellValue = row[key];
@@ -191,13 +228,83 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     );
   }, [rows, filters, dateColumns]);
 
+  const sortedRows = useMemo(() => {
+    if (sortColumns.length === 0) return filteredRows;
+    return [...filteredRows].sort((a, b) => {
+      for (const sort of sortColumns) {
+        const columnKey = sort.columnKey as TicketRowField;
+        const directionMultiplier = sort.direction === "ASC" ? 1 : -1;
+        const aValue = a[columnKey];
+        const bValue = b[columnKey];
+
+        if (aValue === bValue) {
+          continue;
+        }
+
+        if (aValue === null || aValue === undefined) {
+          return -1 * directionMultiplier;
+        }
+        if (bValue === null || bValue === undefined) {
+          return 1 * directionMultiplier;
+        }
+
+        let comparison: number;
+        if (typeof aValue === "number" && typeof bValue === "number") {
+          comparison = aValue - bValue;
+        } else {
+          comparison = collator.compare(String(aValue), String(bValue));
+        }
+
+        if (comparison !== 0) {
+          return comparison * directionMultiplier;
+        }
+      }
+      return 0;
+    });
+  }, [filteredRows, sortColumns, collator]);
+
   const visibleRowKeys = useMemo(
-    () => filteredRows.map((row) => rowKeyGetter(row)),
-    [filteredRows, rowKeyGetter]
+    () => sortedRows.map((row) => rowKeyGetter(row)),
+    [sortedRows, rowKeyGetter]
   );
 
+  const toggleSortColumn = useCallback(
+    (columnKey: TicketRowField, shiftKey: boolean) => {
+      setSortColumns((prev) => {
+        const current = prev.find((entry) => entry.columnKey === columnKey);
+        const currentDirection = current?.direction;
+        const nextDirection =
+          currentDirection === "ASC" ? "DESC" : currentDirection === "DESC" ? undefined : "ASC";
+
+        if (shiftKey) {
+          const remaining = prev.filter((entry) => entry.columnKey !== columnKey);
+          if (!nextDirection) {
+            return remaining;
+          }
+          return [...remaining, { columnKey, direction: nextDirection }];
+        }
+
+        if (!nextDirection) {
+          return [];
+        }
+
+        return [{ columnKey, direction: nextDirection }];
+      });
+    },
+    []
+  );
+
+  const handleReset = useCallback(() => {
+    setFilters({});
+    setSortColumns([]);
+  }, []);
+
+  const totalRowCount = rows.length;
+  const activeFilterCount = Object.keys(filters).length;
+  const filteredRowCount = activeFilterCount > 0 ? filteredRows.length : 0;
+
   const handleFilterChange = useCallback(
-    (key: keyof TicketRow, value: string) => {
+    (key: TicketRowField, value: string) => {
       setFilters((prev) => {
         const next = { ...prev };
         if (value) {
@@ -247,27 +354,18 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         let didChange = false;
 
         const nextRows = prevRows.map((row) => {
-          const key = rowKeyGetter(row);
-          if (!keysToUpdate.has(key)) {
+          if (!keysToUpdate.has(rowKeyGetter(row))) {
             return row;
           }
-
           if (row.AcctCode === sourceValue) {
             return row;
           }
 
           didChange = true;
-          return {
-            ...row,
-            AcctCode: sourceValue,
-          };
+          return { ...row, AcctCode: sourceValue };
         });
 
-        if (!didChange) {
-          return prevRows;
-        }
-
-        return nextRows;
+        return didChange ? nextRows : prevRows;
       });
     },
     [rowKeyGetter, visibleRowKeys]
@@ -275,14 +373,18 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
 
   const columns = useMemo(() => {
     return baseColumns.map((column, columnIndex) => {
-      const columnKey = column.key as keyof TicketRow;
+      const columnKey = column.key as TicketRowField;
+
       const inputType: FilterInputType = dateColumns.has(columnKey)
         ? "date"
         : numericColumns.has(columnKey)
         ? "number"
         : "text";
+      const sortEntry = sortColumns.find((entry) => entry.columnKey === columnKey);
+
       return {
         ...column,
+        sortable: false,
         renderHeaderCell: () => (
           <HeaderFilter
             label={String(column.name)}
@@ -290,9 +392,11 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             type={inputType}
             options={columnOptions.get(columnKey)}
             onChange={(value) => handleFilterChange(columnKey, value)}
+            onLabelClick={(event) => toggleSortColumn(columnKey, event.shiftKey)}
+            sortDirection={sortEntry?.direction ?? null}
           />
         ),
-        renderCell: (cellProps) => {
+        renderCell: (cellProps: Parameters<Column<TicketRow>["renderCell"]>[0]) => {
           const allowDrag = columnKey === "AcctCode";
           return (
             <DraggableCell<TicketRow>
@@ -309,13 +413,15 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     });
   }, [
     baseColumns,
-    dateColumns,
     columnOptions,
+    dateColumns,
     filters,
     handleCellValueDrop,
     handleFilterChange,
     numericColumns,
     rowKeyGetter,
+    sortColumns,
+    toggleSortColumn,
   ]);
 
   const resolvedHeight =
@@ -324,6 +430,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const gridStyle: CSSProperties = {
     height: "100%",
     width: "100%",
+    "--rdg-background-color": "#e6eaed",
     "--rdg-header-background-color": "var(--gr-pistachio)",
     "--rdg-header-draggable-background-color": "var(--gr-pistachio)",
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
@@ -354,60 +461,135 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [rowKeyGetter]
   );
 
+  const handleRetrieve = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const response = await fetch("/api/tickets", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        let message = text.trim();
+        if (message) {
+          try {
+            const parsed = JSON.parse(message) as { error?: string };
+            if (parsed?.error) {
+              message = parsed.error;
+            }
+          } catch {
+            // ignore JSON parse failures and fall back to raw text
+          }
+        }
+        throw new Error(message || "Request failed");
+      }
+
+      const data = (await response.json()) as {
+        rows?: TicketApiRow[];
+        error?: string;
+      };
+
+      if (!data.rows) {
+        throw new Error(data.error || "No data returned from server");
+      }
+
+      const mapped = data.rows.map((record, index) => toTicketRow(record, index));
+      setRows(mapped);
+      setFilters({});
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unexpected error");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   return (
-    <div className="w-full" style={{ height: resolvedHeight, minHeight: 400 }}>
-      <DataGrid<TicketRow>
-        columns={columns}
-        rows={filteredRows}
-        onRowsChange={handleRowsChange}
-        rowKeyGetter={rowKeyGetter}
-        /* Drag-to-fill (TS-safe cast of RDG FillEvent) */
-        onFill={(event: FillEvent<TicketRow>) => {
-          const columnKey = event.columnKey as keyof TicketRow;
-          return {
-            ...event.targetRow,
-            [columnKey]: event.sourceRow[columnKey],
-          };
+    <div
+      className="w-full flex flex-col"
+      style={{ height: resolvedHeight, minHeight: 400, gap: "12px" }}
+    >
+      <div
+        className="flex flex-wrap items-center gap-3 rounded-md"
+        style={{
+          backgroundColor: "var(--gr-green)",
+          padding: "10px 14px",
         }}
-        headerRowHeight={64}
-        style={gridStyle}
-      />
+      >
+        <button
+          type="button"
+          onClick={handleRetrieve}
+          disabled={isLoading}
+          className="px-4 py-2 rounded-md font-medium"
+        style={{
+          backgroundColor: "#B9BBB6",
+          border: "1px solid color-mix(in srgb, #B9BBB6 70%, black)",
+          color: "#000000",
+          fontWeight: 700,
+          opacity: isLoading ? 0.7 : 1,
+          cursor: isLoading ? "not-allowed" : "pointer",
+        }}
+      >
+          {isLoading ? "Retrieving..." : "Retrieve Tickets"}
+        </button>
+        <button
+          type="button"
+          onClick={handleReset}
+          disabled={isLoading}
+          className="px-4 py-2 rounded-md font-medium"
+        style={{
+          backgroundColor: "#B9BBB6",
+          border: "1px solid color-mix(in srgb, #B9BBB6 70%, black)",
+          color: "#000000",
+          fontWeight: 700,
+          cursor: isLoading ? "not-allowed" : "pointer",
+          opacity: isLoading ? 0.7 : 1,
+        }}
+        >
+          Reset Filters
+        </button>
+        <div
+          className="flex items-center gap-2 text-sm"
+          style={{ color: "var(--gr-orange)" }}
+          aria-live="polite"
+        >
+          <span>
+            Total rows: <span className="font-semibold">{totalRowCount}</span>
+          </span>
+          <span aria-hidden="true">|</span>
+          <span>
+            Filtered rows: <span className="font-semibold">{filteredRowCount}</span>
+          </span>
+        </div>
+        {loadError ? (
+          <span className="text-sm" style={{ color: "var(--gr-error, #b00020)" }}>
+            {loadError}
+          </span>
+        ) : null}
+      </div>
+      <div className="flex-1 min-h-0 w-full">
+        <DataGrid<TicketRow>
+          columns={columns}
+          rows={sortedRows}
+          onRowsChange={handleRowsChange}
+          rowKeyGetter={rowKeyGetter}
+          sortColumns={sortColumns}
+          onSortColumnsChange={setSortColumns}
+          defaultColumnOptions={{ resizable: true }}
+          /* Drag-to-fill (TS-safe cast of RDG FillEvent) */
+          onFill={(event: FillEvent<TicketRow>) => {
+            const columnKey = event.columnKey as TicketRowField;
+            if (columnKey === undefined) return event.targetRow;
+            return {
+              ...event.targetRow,
+              [columnKey]: event.sourceRow[columnKey],
+            };
+          }}
+          headerRowHeight={64}
+          style={gridStyle}
+        />
+      </div>
     </div>
-  );
-}
-
-function TextEditor<R extends Record<string, unknown>>({
-  row,
-  column,
-  onRowChange,
-}: RenderEditCellProps<R>) {
-  const key = column.key as keyof R;
-  const val = row[key] as unknown as string | undefined;
-
-  const commit = (raw: string) => {
-    onRowChange(
-      {
-        ...row,
-        [key]: (raw as unknown) as R[typeof key],
-      },
-      true
-    );
-  };
-
-  return (
-    <input
-      autoFocus
-      type="text"
-      value={val ?? ""}
-      onChange={(event) => commit(event.target.value)}
-      onBlur={(event) => commit(event.target.value)}
-      style={{
-        width: "100%",
-        height: "100%",
-        border: "none",
-        outline: "none",
-        padding: "0 8px",
-      }}
-    />
   );
 }

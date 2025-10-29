@@ -7,7 +7,7 @@ import TicketsGrid from "../../components/grids/TicketsGrid";
 import OrdersGrid from "../../components/grids/OrdersGrid";
 
 const BUTTON_BASE =
-  "px-4 py-2 text-sm font-medium border rounded-md transition-colors";
+  "px-5 py-2.5 text-[1.09375rem] font-medium border rounded-md transition-colors";
 
 export default function CodingGridSwitcher() {
   const [active, setActive] = useState<"tickets" | "orders">("tickets");
@@ -50,15 +50,20 @@ export default function CodingGridSwitcher() {
     );
   };
 
+  const framePadding = 16;
+
   const frameStyle: CSSProperties & { ["--rdg-border-color"]?: string } = {
-    backgroundColor: "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
-    padding: "16px",
+    backgroundColor: "var(--gr-grey-5)",
+    padding: `${framePadding}px`,
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
   };
 
   return (
     <section className="flex flex-col flex-1 min-h-0 gap-4 w-full">
-      <div className="flex flex-wrap gap-2">
+      <div
+        className="flex flex-wrap gap-2"
+        style={{ paddingLeft: `${framePadding}px` }}
+      >
         {renderButton("Tickets", "tickets")}
         {renderButton("Orders", "orders")}
       </div>

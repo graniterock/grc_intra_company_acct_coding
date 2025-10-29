@@ -114,7 +114,7 @@ body {
 .rdg,
 .rdg .rdg-row,
 .rdg .rdg-cell {
-  background-color: var(--gr-surface);
+  background-color: var(--rdg-background-color);
 }
 
 .rdg .rdg-header-row .rdg-cell {
