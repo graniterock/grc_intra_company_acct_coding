@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ChangeEvent, MouseEvent as ReactMouseEvent } from "react";
+import type {
+  ChangeEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 
 type HeaderFilterProps = {
   label: string;
@@ -10,6 +14,8 @@ type HeaderFilterProps = {
   type: FilterInputType;
   options?: string[];
   onChange: (value: string) => void;
+  onLabelClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  sortDirection?: "ASC" | "DESC" | null;
 };
 
 type FilterInputType = "text" | "number" | "date";
@@ -22,6 +28,8 @@ export function HeaderFilter({
   type,
   options,
   onChange,
+  onLabelClick,
+  sortDirection,
 }: HeaderFilterProps) {
   const normalizedValue = value ?? "";
   const optionList = useMemo(
@@ -75,6 +83,11 @@ export function HeaderFilter({
     });
   };
 
+  const handleLabelClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onLabelClick?.(event);
+  };
+
   const handleSelectOption = (option: string) => {
     onChange(option);
     setIsOpen(false);
@@ -87,6 +100,10 @@ export function HeaderFilter({
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     onChange(event.target.value);
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    event.stopPropagation();
   };
 
   return (
@@ -110,10 +127,33 @@ export function HeaderFilter({
           gap: "6px",
         }}
       >
-        <span>{label}</span>
+        <button
+          type="button"
+          onClick={handleLabelClick}
+          aria-label={`Sort by ${label}`}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: "var(--gr-ink)",
+            fontWeight: 600,
+            fontSize: "0.75rem",
+            padding: 0,
+            margin: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+            cursor: onLabelClick ? "pointer" : "default",
+          }}
+        >
+          <span>{label}</span>
+          {sortDirection ? (
+            <span aria-hidden="true">{sortDirection === "ASC" ? "\u25B2" : "\u25BC"}</span>
+          ) : null}
+        </button>
         <button
           type="button"
           onClick={handleToggleDropdown}
+          onPointerDown={handlePointerDown}
           aria-label={`Show filters for ${label}`}
           style={{
             appearance: "none",
@@ -218,11 +258,12 @@ export function HeaderFilter({
             )}
           </div>,
           document.body
-        )}
+      )}
       <input
         type={type}
         value={normalizedValue}
         onChange={handleInputChange}
+        onPointerDown={handlePointerDown}
         style={{
           fontSize: "0.75rem",
           fontWeight: 500,
