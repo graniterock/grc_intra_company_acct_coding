@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { DataGrid, type Column, type SortColumn } from "react-data-grid";
-import type { FillEvent, RowsChangeData } from "react-data-grid";
+import type { FillEvent, RenderCellProps, RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 
 import type { OrderRow } from "../../types/grids";
@@ -435,7 +435,7 @@ export default function OrdersGrid({ height = 500 }: OrdersGridProps) {
             sortDirection={sortEntry?.direction ?? null}
           />
         ),
-        renderCell: (cellProps) => (
+        renderCell: (cellProps: RenderCellProps<OrderRow>) => (
           <DraggableCell<OrderRow>
             {...cellProps}
             columnIndex={columnIndex}
