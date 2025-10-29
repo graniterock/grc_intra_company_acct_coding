@@ -1,3 +1,4 @@
+import os from "os";
 import sql, { type ConnectionPool, type config as SqlConfig } from "mssql";
 
 const required = (value: string | undefined, name: string): string => {
@@ -57,10 +58,68 @@ if (instanceName) {
 let pool: ConnectionPool | null = null;
 
 const TICKETS_QUERY = `
-WITH Tickets AS (
-    /* --- 1) Current base tickets (Tkbatch) --- */
+;WITH base_src AS (
+    SELECT
+        TicketNo,
+        UniqueID,
+        CAST(ItemNo AS int) AS ItemNo,
+        LocationID,
+        CustomerID,
+        OrderID,
+        ProductID,
+        Description,
+        TicketDate,
+        Unit,
+        Qty,
+        UnitPrice,
+        ExportStatus
+    FROM Tkbatch
+    UNION ALL
+    SELECT
+        TicketNo,
+        UniqueID,
+        CAST(ItemNo AS int) AS ItemNo,
+        LocationID,
+        CustomerID,
+        OrderID,
+        ProductID,
+        Description,
+        TicketDate,
+        Unit,
+        Qty,
+        UnitPrice,
+        ExportStatus
+    FROM Tkhist1
+    WHERE ExportStatus = 'X'
+),
+other_src AS (
+    SELECT
+        TicketNo,
+        UniqueID,
+        CAST(ItemNo AS int) AS ItemNo,
+        OtherChargeID AS ProductID,
+        Description,
+        Unit,
+        Qty,
+        UnitPrice
+    FROM Tkeother
+    UNION ALL
+    SELECT
+        TicketNo,
+        UniqueID,
+        CAST(ItemNo AS int) AS ItemNo,
+        OtherChargeID AS ProductID,
+        Description,
+        Unit,
+        Qty,
+        UnitPrice
+    FROM Tkohist
+),
+base AS (
     SELECT
         b.TicketNo,
+        b.UniqueID,
+        b.ItemNo,
         b.LocationID,
         o.Description2 AS JobNumber,
         b.CustomerID,
@@ -72,20 +131,82 @@ WITH Tickets AS (
         b.Qty,
         b.UnitPrice,
         o.Description1 AS JobName,
-        0 AS SourceRank  -- base first
-    FROM Tkbatch AS b
-    INNER JOIN Slordnam AS o ON b.OrderID = o.OrderID
+        0 AS SourceRank
+    FROM base_src AS b
+    INNER JOIN Slordnam AS o ON b.OrderID    = o.OrderID
     INNER JOIN Slcust   AS c ON b.CustomerID = c.CustomerID
     WHERE b.ExportStatus <> 'E'
       AND c.ArType = 'C'
-
-    UNION ALL
-
-    /* --- 2) Historical base tickets (Tkhist1) --- */
+),
+base_max AS (
+    SELECT TicketNo, UniqueID, MAX(ItemNo) AS MaxBaseItemNo
+    FROM base
+    GROUP BY TicketNo, UniqueID
+),
+e_raw AS (
     SELECT
-        b.TicketNo,
+        e.TicketNo,
+        b.UniqueID,
+        e.ItemNo,
         b.LocationID,
         o.Description2 AS JobNumber,
+        b.CustomerID,
+        b.OrderID,
+        e.ProductID,
+        e.Description,
+        b.TicketDate,
+        e.Unit,
+        e.Qty,
+        e.UnitPrice,
+        o.Description1 AS JobName,
+        1 AS SourceRank
+    FROM other_src AS e
+    INNER JOIN base_src AS b
+        ON e.TicketNo = b.TicketNo
+       AND e.UniqueID = b.UniqueID
+    INNER JOIN Slordnam AS o ON b.OrderID    = o.OrderID
+    INNER JOIN Slcust   AS c ON b.CustomerID = c.CustomerID
+    WHERE b.ExportStatus <> 'E'
+      AND c.ArType = 'C'
+),
+e_dedup AS (
+    SELECT *
+         , ROW_NUMBER() OVER (
+               PARTITION BY TicketNo, UniqueID, ProductID
+               ORDER BY ItemNo
+           ) AS rn
+    FROM e_raw
+),
+e_seq AS (
+    SELECT
+        d.TicketNo,
+        d.UniqueID,
+        d.LocationID,
+        d.JobNumber,
+        d.CustomerID,
+        d.OrderID,
+        d.ProductID,
+        d.Description,
+        d.TicketDate,
+        d.Unit,
+        d.Qty,
+        d.UnitPrice,
+        d.JobName,
+        d.SourceRank,
+        ROW_NUMBER() OVER (
+            PARTITION BY d.TicketNo, d.UniqueID
+            ORDER BY d.ProductID, d.ItemNo, d.Description
+        ) AS OtherRowNum
+    FROM e_dedup AS d
+    WHERE d.rn = 1
+),
+final_rows AS (
+    SELECT
+        b.TicketNo,
+        b.UniqueID,
+        b.ItemNo,
+        b.LocationID,
+        b.JobNumber,
         b.CustomerID,
         b.OrderID,
         b.ProductID,
@@ -94,66 +215,37 @@ WITH Tickets AS (
         b.Unit,
         b.Qty,
         b.UnitPrice,
-        o.Description1 AS JobName,
-        0 AS SourceRank  -- base first
-    FROM Tkhist1 AS b
-    INNER JOIN Slordnam AS o ON b.OrderID = o.OrderID
-    INNER JOIN Slcust   AS c ON b.CustomerID = c.CustomerID
-    --WHERE b.ExportStatus <> 'E'
-    WHERE b.ExportStatus = 'X'
-      AND c.ArType = 'C'
+        b.JobName,
+        b.SourceRank
+    FROM base AS b
 
     UNION ALL
 
-    /* --- 3) Current "other" lines (Tkeother) joined via Tkbatch --- */
     SELECT
         e.TicketNo,
-        b.LocationID,
-        o.Description2 AS JobNumber,
-        b.CustomerID,
-        b.OrderID,
-        e.OtherChargeID AS ProductID,
-        e.Description,       -- 'other' description
-        b.TicketDate,        -- use base ticket date for ordering
+        e.UniqueID,
+        (ISNULL(m.MaxBaseItemNo, 0) + e.OtherRowNum) AS ItemNo,
+        e.LocationID,
+        e.JobNumber,
+        e.CustomerID,
+        e.OrderID,
+        e.ProductID,
+        e.Description,
+        e.TicketDate,
         e.Unit,
         e.Qty,
         e.UnitPrice,
-        o.Description1 AS JobName,
-        1 AS SourceRank      -- other after base for same ticket
-    FROM Tkeother AS e
-    INNER JOIN Tkbatch  AS b ON e.TicketNo = b.TicketNo
-    INNER JOIN Slordnam AS o ON b.OrderID   = o.OrderID
-    INNER JOIN Slcust   AS c ON b.CustomerID = c.CustomerID
-    WHERE b.ExportStatus <> 'E'
-      AND c.ArType = 'C'
-
-    UNION ALL
-
-    /* --- 4) Historical "other" lines (Tkohist) joined via Tkhist1 --- */
-    SELECT
-        e.TicketNo,
-        b.LocationID,
-        o.Description2 AS JobNumber,
-        b.CustomerID,
-        b.OrderID,
-        e.OtherChargeID AS ProductID,
-        e.Description,       -- 'other' description
-        b.TicketDate,        -- use base ticket date for ordering
-        e.Unit,
-        e.Qty,
-        e.UnitPrice,
-        o.Description1 AS JobName,
-        1 AS SourceRank      -- other after base for same ticket
-    FROM Tkohist AS e
-    INNER JOIN Tkhist1 AS b ON e.TicketNo = b.TicketNo
-    INNER JOIN Slordnam AS o ON b.OrderID   = o.OrderID
-    INNER JOIN Slcust   AS c ON b.CustomerID = c.CustomerID
-    --WHERE b.ExportStatus <> 'E'
-    WHERE b.ExportStatus = 'X'
-      AND c.ArType = 'C'
+        e.JobName,
+        e.SourceRank
+    FROM e_seq AS e
+    JOIN base_max AS m
+      ON m.TicketNo = e.TicketNo
+     AND m.UniqueID = e.UniqueID
 )
 SELECT
     TicketNo,
+    UniqueID,
+    ItemNo,
     LocationID,
     JobNumber,
     CustomerID,
@@ -165,10 +257,11 @@ SELECT
     Qty,
     UnitPrice,
     JobName
-FROM Tickets
+FROM final_rows
 ORDER BY
     TicketNo,
-    TicketDate,
+    UniqueID,
+    ItemNo,
     SourceRank;
 `;
 
@@ -186,6 +279,8 @@ async function getPool(): Promise<ConnectionPool> {
 
 export type TicketRecord = {
   TicketNo: string;
+  UniqueID: string | number | null;
+  ItemNo: string | number | null;
   LocationID: string | number | null;
   JobNumber: string | null;
   CustomerID: string | number | null;
@@ -199,8 +294,126 @@ export type TicketRecord = {
   JobName: string | null;
 };
 
+export type TicketAccountCodeInput = {
+  TicketNo: number;
+  TicketUniqueID: number;
+  TicketItemNo: number;
+  ProductID: string;
+  LocationID: string;
+  OrderID: string;
+  TicketDateTime: Date;
+  TicketAccountCode: string | null;
+  OnHold?: string | null;
+};
+
 export async function fetchTickets(): Promise<TicketRecord[]> {
   const connection = await getPool();
   const results = await connection.request().query<TicketRecord>(TICKETS_QUERY);
   return results.recordset ?? [];
+}
+
+const resolveWindowsUser = (): string => {
+  try {
+    const details = os.userInfo();
+    if (details?.username) {
+      return details.username;
+    }
+  } catch {
+    // intentionally ignore user info lookups failing
+  }
+
+  return (
+    process.env.USERNAME ||
+    process.env.USER ||
+    process.env.LOGNAME ||
+    "unknown"
+  );
+};
+
+export async function saveTicketAccountCodes(
+  rows: TicketAccountCodeInput[]
+): Promise<void> {
+  if (rows.length === 0) {
+    return;
+  }
+
+  const connection = await getPool();
+  const transaction = new sql.Transaction(connection);
+  await transaction.begin();
+
+  const now = new Date();
+  const lastUpdatedBy = resolveWindowsUser();
+
+  try {
+    for (const row of rows) {
+      const request = new sql.Request(transaction);
+      request.input("TicketNo", sql.Int, row.TicketNo);
+      request.input("TicketUniqueID", sql.Int, row.TicketUniqueID);
+      request.input("TicketItemNo", sql.Int, row.TicketItemNo);
+      request.input("ProductID", sql.VarChar(25), row.ProductID);
+      request.input("LocationID", sql.VarChar(25), row.LocationID);
+      request.input("OrderID", sql.VarChar(25), row.OrderID);
+      request.input("TicketDateTime", sql.DateTime, row.TicketDateTime);
+      request.input(
+        "TicketAccountCode",
+        sql.NVarChar(20),
+        row.TicketAccountCode
+      );
+      request.input("LastUpdatedDateTime", sql.DateTime, now);
+      request.input("LastUpdatedByUser", sql.VarChar(40), lastUpdatedBy);
+      request.input("OnHold", sql.Char(1), row.OnHold ?? null);
+
+      await request.query(`
+        UPDATE dbo.GRC_Intra_Ticket_AccountCode_Working
+        SET Ticket_AccountCode = @TicketAccountCode,
+            LastUpdatedDateTime = @LastUpdatedDateTime,
+            LastUpdatedByUser = @LastUpdatedByUser,
+            OnHold = @OnHold
+        WHERE TicketNo = @TicketNo
+          AND TicketUniqueID = @TicketUniqueID
+          AND TicketItemNo = @TicketItemNo
+          AND ProductID = @ProductID
+          AND LocationID = @LocationID
+          AND OrderID = @OrderID
+          AND Ticket_DateTime = @TicketDateTime;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+          INSERT INTO dbo.GRC_Intra_Ticket_AccountCode_Working (
+            TicketNo,
+            TicketUniqueID,
+            TicketItemNo,
+            ProductID,
+            LocationID,
+            OrderID,
+            Ticket_DateTime,
+            Ticket_AccountCode,
+            LastUpdatedDateTime,
+            LastUpdatedByUser,
+            OnHold
+          )
+          VALUES (
+            @TicketNo,
+            @TicketUniqueID,
+            @TicketItemNo,
+            @ProductID,
+            @LocationID,
+            @OrderID,
+            @TicketDateTime,
+            @TicketAccountCode,
+            @LastUpdatedDateTime,
+            @LastUpdatedByUser,
+            @OnHold
+          );
+        END
+      `);
+    }
+
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback().catch(() => {
+      // ignore rollback failures
+    });
+    throw error;
+  }
 }

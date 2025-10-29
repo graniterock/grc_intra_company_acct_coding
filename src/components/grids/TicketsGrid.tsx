@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { DataGrid, type Column, type SortColumn } from "react-data-grid";
-import type { FillEvent, RowsChangeData } from "react-data-grid";
+import type { FillEvent, RenderCellProps, RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
@@ -12,6 +12,8 @@ import { TextEditor } from "./TextEditor";
 
 type TicketRow = {
   id: string;
+  UniqueID: string;
+  ItemNo: string;
   TicketNo: string;
   LocationID: string;
   JobNumber: string;
@@ -31,6 +33,8 @@ type TicketRowField = Exclude<keyof TicketRow, "id">;
 
 type TicketApiRow = {
   TicketNo: string | number | null;
+  UniqueID: string | number | null;
+  ItemNo: string | number | null;
   LocationID: string | number | null;
   JobNumber: string | null;
   CustomerID: string | number | null;
@@ -72,8 +76,19 @@ const asNumber = (value: number | string | null | undefined): number | null => {
 
 const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
   const ticketNo = asString(record.TicketNo);
+  const uniqueId = asString(record.UniqueID);
+  const itemNo = asString(record.ItemNo);
+  const rowId =
+    uniqueId !== ""
+      ? itemNo !== ""
+        ? `${uniqueId}-${itemNo}`
+        : uniqueId
+      : `${ticketNo || "ticket"}-${index}`;
+
   return {
-    id: `${ticketNo || "ticket"}-${index}`,
+    id: rowId,
+    UniqueID: uniqueId,
+    ItemNo: itemNo,
     TicketNo: ticketNo,
     LocationID: asString(record.LocationID),
     JobNumber: asString(record.JobNumber),
@@ -96,6 +111,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sortColumns, setSortColumns] = useState<SortColumn[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   const collator = useMemo(
     () => new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }),
@@ -297,11 +315,29 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const handleReset = useCallback(() => {
     setFilters({});
     setSortColumns([]);
+    setSaveError(null);
+    setSaveMessage(null);
   }, []);
 
   const totalRowCount = rows.length;
   const activeFilterCount = Object.keys(filters).length;
   const filteredRowCount = activeFilterCount > 0 ? filteredRows.length : 0;
+  const hasSaveableRows = useMemo(
+    () =>
+      rows.some(
+        (row) =>
+          row.AcctCode &&
+          row.AcctCode.trim().length > 0 &&
+          row.TicketNo &&
+          row.UniqueID &&
+          row.ItemNo &&
+          row.ProductID &&
+          row.LocationID &&
+          row.OrderID &&
+          row.TicketDate
+      ),
+    [rows]
+  );
 
   const handleFilterChange = useCallback(
     (key: TicketRowField, value: string) => {
@@ -396,7 +432,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             sortDirection={sortEntry?.direction ?? null}
           />
         ),
-        renderCell: (cellProps: Parameters<Column<TicketRow>["renderCell"]>[0]) => {
+        renderCell: (cellProps: RenderCellProps<TicketRow>) => {
           const allowDrag = columnKey === "AcctCode";
           return (
             <DraggableCell<TicketRow>
@@ -464,6 +500,8 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const handleRetrieve = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
+    setSaveError(null);
+    setSaveMessage(null);
     try {
       const response = await fetch("/api/tickets", {
         method: "GET",
@@ -504,12 +542,104 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       const mapped = data.rows.map((record, index) => toTicketRow(record, index));
       setRows(mapped);
       setFilters({});
+      setSaveMessage(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unexpected error");
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!hasSaveableRows) {
+      setSaveError("No rows with an account code to save.");
+      setSaveMessage(null);
+      return;
+    }
+
+    const candidates = rows.filter(
+      (row) =>
+        row.TicketNo &&
+        row.UniqueID &&
+        row.ItemNo &&
+        row.ProductID &&
+        row.LocationID &&
+        row.OrderID &&
+        row.TicketDate &&
+        row.AcctCode &&
+        row.AcctCode.trim().length > 0
+    );
+
+    if (candidates.length === 0) {
+      setSaveError("No rows with an account code to save.");
+      setSaveMessage(null);
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError(null);
+    setSaveMessage(null);
+
+    try {
+      const payload = candidates.map((row) => ({
+        TicketNo: row.TicketNo,
+        UniqueID: row.UniqueID,
+        ItemNo: row.ItemNo,
+        ProductID: row.ProductID,
+        LocationID: row.LocationID,
+        OrderID: row.OrderID,
+        TicketDate: row.TicketDate,
+        TicketAccountCode: row.AcctCode.trim(),
+      }));
+
+      const response = await fetch("/api/tickets/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ rows: payload }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        const trimmed = text.trim();
+        let message = "Unable to save ticket data.";
+
+        if (trimmed) {
+          try {
+            const parsed = JSON.parse(trimmed) as { error?: string };
+            if (parsed?.error) {
+              message = parsed.error;
+            } else {
+              message = trimmed;
+            }
+          } catch {
+            if (!/^<!doctype html/i.test(trimmed) && !/^<html/i.test(trimmed)) {
+              message = trimmed;
+            }
+          }
+        }
+
+        throw new Error(message);
+      }
+
+      const result = (await response.json()) as { saved?: number };
+      const savedCount = result?.saved ?? 0;
+      setSaveMessage(
+        savedCount > 0
+          ? `Saved ${savedCount} row${savedCount === 1 ? "" : "s"}.`
+          : "No rows were saved."
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to save ticket data.";
+      setSaveError(message);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [rows, hasSaveableRows]);
 
   return (
     <div
@@ -538,6 +668,22 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         }}
       >
           {isLoading ? "Retrieving..." : "Retrieve Tickets"}
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={isLoading || isSaving || !hasSaveableRows}
+          className="px-4 py-2 rounded-md font-medium"
+        style={{
+          backgroundColor: "#B9BBB6",
+          border: "1px solid color-mix(in srgb, #B9BBB6 70%, black)",
+          color: "#000000",
+          fontWeight: 700,
+          cursor: isLoading || isSaving || !hasSaveableRows ? "not-allowed" : "pointer",
+          opacity: isLoading || isSaving || !hasSaveableRows ? 0.7 : 1,
+        }}
+        >
+          {isSaving ? "Saving..." : "Save Tickets"}
         </button>
         <button
           type="button"
@@ -571,6 +717,15 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         {loadError ? (
           <span className="text-sm" style={{ color: "var(--gr-error, #b00020)" }}>
             {loadError}
+          </span>
+        ) : null}
+        {saveError ? (
+          <span className="text-sm" style={{ color: "var(--gr-error, #b00020)" }}>
+            {saveError}
+          </span>
+        ) : saveMessage ? (
+          <span className="text-sm" style={{ color: "var(--gr-green-dark, #0c5132)" }}>
+            {saveMessage}
           </span>
         ) : null}
       </div>
