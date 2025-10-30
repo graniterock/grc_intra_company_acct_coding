@@ -58,30 +58,40 @@ export default function CodingGridSwitcher() {
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
   };
 
+  const viewLabel = active === "tickets" ? "Tickets" : "Orders";
+
   return (
     <section className="flex flex-col flex-1 min-h-0 gap-4 w-full">
       <div
-        className="flex flex-wrap gap-2"
-        style={{ paddingLeft: `${framePadding}px` }}
+        className="flex flex-wrap items-center gap-3 w-full"
+        style={{
+          paddingLeft: `${framePadding}px`,
+          paddingRight: `${framePadding}px`,
+        }}
       >
-        {renderButton("Tickets", "tickets")}
-        {renderButton("Orders", "orders")}
+        <div className="flex flex-wrap gap-2">
+          {renderButton("Tickets", "tickets")}
+          {renderButton("Orders", "orders")}
+        </div>
+        <div className="flex-1 flex justify-center">
+          <div
+            style={{
+              color: "#000000",
+              fontWeight: 700,
+              fontSize: "1.85rem",
+              lineHeight: 1.1,
+              textAlign: "center",
+              minWidth: "fit-content",
+            }}
+          >
+            {viewLabel}
+          </div>
+        </div>
       </div>
       <div
         className="flex flex-col flex-1 min-h-0 h-full w-full rounded-xl shadow-md"
         style={frameStyle}
       >
-        <div
-          style={{
-            color: "#000000",
-            fontWeight: 600,
-            fontSize: "1.235rem",
-            marginBottom: "8px",
-            textAlign: "center",
-          }}
-        >
-          {active === "tickets" ? "Tickets" : "Orders"}
-        </div>
         <div
           ref={gridShellRef}
           className="flex-1 min-h-0 h-full w-full rounded-lg overflow-hidden"
