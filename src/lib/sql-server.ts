@@ -241,6 +241,118 @@ final_rows AS (
     JOIN base_max AS m
       ON m.TicketNo = e.TicketNo
      AND m.UniqueID = e.UniqueID
+),
+working_rows AS (
+    SELECT
+        fr.TicketNo,
+        fr.UniqueID,
+        fr.ItemNo,
+        fr.LocationID,
+        fr.JobNumber,
+        fr.CustomerID,
+        fr.OrderID,
+        fr.ProductID,
+        fr.Description,
+        fr.TicketDate,
+        fr.Unit,
+        fr.Qty,
+        fr.UnitPrice,
+        fr.JobName,
+        fr.SourceRank,
+        w.Ticket_AccountCode,
+        w.OnHold,
+        CONVERT(datetime2(0), w.Ticket_DateTime) AS TicketDateTime,
+        CAST(1 AS bit) AS IsWorkingRow
+    FROM dbo.GRC_Intra_Ticket_AccountCode_Working AS w
+    INNER JOIN final_rows AS fr
+        ON fr.TicketNo = w.TicketNo
+       AND fr.UniqueID = w.TicketUniqueID
+       AND fr.ItemNo = w.TicketItemNo
+       AND fr.ProductID = w.ProductID
+       AND fr.LocationID = w.LocationID
+       AND fr.OrderID = w.OrderID
+       AND CONVERT(datetime2(0), fr.TicketDate) = CONVERT(datetime2(0), w.Ticket_DateTime)
+),
+base_only AS (
+    SELECT
+        fr.TicketNo,
+        fr.UniqueID,
+        fr.ItemNo,
+        fr.LocationID,
+        fr.JobNumber,
+        fr.CustomerID,
+        fr.OrderID,
+        fr.ProductID,
+        fr.Description,
+        fr.TicketDate,
+        fr.Unit,
+        fr.Qty,
+        fr.UnitPrice,
+        fr.JobName,
+        fr.SourceRank,
+        NULL AS Ticket_AccountCode,
+        NULL AS OnHold,
+        CONVERT(datetime2(0), fr.TicketDate) AS TicketDateTime,
+        CAST(0 AS bit) AS IsWorkingRow
+    FROM final_rows AS fr
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM dbo.GRC_Intra_Ticket_AccountCode_Working AS w
+        WHERE w.TicketNo = fr.TicketNo
+          AND w.TicketUniqueID = fr.UniqueID
+          AND w.TicketItemNo = fr.ItemNo
+          AND w.ProductID = fr.ProductID
+          AND w.LocationID = fr.LocationID
+          AND w.OrderID = fr.OrderID
+          AND CONVERT(datetime2(0), w.Ticket_DateTime) = CONVERT(datetime2(0), fr.TicketDate)
+    )
+),
+combined AS (
+    SELECT
+        TicketNo,
+        UniqueID,
+        ItemNo,
+        LocationID,
+        JobNumber,
+        CustomerID,
+        OrderID,
+        ProductID,
+        Description,
+        TicketDate,
+        Unit,
+        Qty,
+        UnitPrice,
+        JobName,
+        Ticket_AccountCode,
+        OnHold,
+        TicketDateTime,
+        IsWorkingRow,
+        SourceRank
+    FROM working_rows
+
+    UNION ALL
+
+    SELECT
+        TicketNo,
+        UniqueID,
+        ItemNo,
+        LocationID,
+        JobNumber,
+        CustomerID,
+        OrderID,
+        ProductID,
+        Description,
+        TicketDate,
+        Unit,
+        Qty,
+        UnitPrice,
+        JobName,
+        Ticket_AccountCode,
+        OnHold,
+        TicketDateTime,
+        IsWorkingRow,
+        SourceRank
+    FROM base_only
 )
 SELECT
     TicketNo,
@@ -256,10 +368,15 @@ SELECT
     Unit,
     Qty,
     UnitPrice,
-    JobName
-FROM final_rows
+    JobName,
+    Ticket_AccountCode AS TicketAccountCode,
+    OnHold,
+    IsWorkingRow,
+    TicketDateTime
+FROM combined
 ORDER BY
     TicketNo,
+    TicketDateTime,
     UniqueID,
     ItemNo,
     SourceRank;
@@ -288,10 +405,14 @@ export type TicketRecord = {
   ProductID: string | number | null;
   Description: string | null;
   TicketDate: Date | string | null;
+  TicketDateTime: Date | string | null;
   Unit: string | null;
   Qty: number | string | null;
   UnitPrice: number | string | null;
   JobName: string | null;
+  TicketAccountCode: string | null;
+  OnHold: string | null;
+  IsWorkingRow: boolean | number | null;
 };
 
 export type TicketAccountCodeInput = {

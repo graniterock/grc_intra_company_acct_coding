@@ -22,14 +22,22 @@ type TicketRow = {
   ProductID: string;
   Description: string;
   TicketDate: string;
+  TicketDateDisplay: string;
+  TicketDateTime: string | null;
   Unit: string;
   Qty: number | null;
   UnitPrice: number | null;
+  ExtendedCost: number | null;
   JobName: string;
   AcctCode: string;
+  OnHold: string | null;
+  IsWorkingRow: boolean;
 };
 
-type TicketRowField = Exclude<keyof TicketRow, "id">;
+type TicketRowField = Exclude<
+  keyof TicketRow,
+  "id" | "TicketDateDisplay" | "TicketDateTime" | "OnHold" | "IsWorkingRow"
+>;
 
 type TicketApiRow = {
   TicketNo: string | number | null;
@@ -42,27 +50,69 @@ type TicketApiRow = {
   ProductID: string | number | null;
   Description: string | null;
   TicketDate: string | Date | null;
+  TicketDateTime?: string | Date | null;
   Unit: string | null;
   Qty: number | string | null;
   UnitPrice: number | string | null;
   JobName: string | null;
+  TicketAccountCode?: string | null;
+  OnHold?: string | null;
+  IsWorkingRow?: boolean | number | null;
 };
 
 type TicketsGridProps = {
   height?: number | string;
 };
 
-const formatDate = (value: TicketApiRow["TicketDate"]): string => {
+const parseDateValue = (
+  value: TicketApiRow["TicketDate"] | TicketApiRow["TicketDateTime"]
+): Date | null => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const candidate = new Date(
+    typeof value === "string" ? value : String(value)
+  );
+  return Number.isNaN(candidate.getTime()) ? null : candidate;
+};
+
+const formatDateDisplay = (value: Date | null): string => {
   if (!value) return "";
-  const candidate =
-    value instanceof Date ? value : new Date(typeof value === "string" ? value : String(value));
-  if (Number.isNaN(candidate.getTime())) return "";
-  return candidate.toISOString().slice(0, 10);
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  const year = value.getUTCFullYear();
+  return `${month}/${day}/${year}`;
+};
+
+const currencyFormatter = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+const formatCurrency = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return "";
+  if (!Number.isFinite(value)) return "";
+  return currencyFormatter.format(value);
 };
 
 const asString = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined) return "";
   return String(value).trim();
+};
+
+const asNullableString = (
+  value: string | number | null | undefined
+): string | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const trimmed = String(value).trim();
+  return trimmed === "" ? null : trimmed;
 };
 
 const asNumber = (value: number | string | null | undefined): number | null => {
@@ -75,6 +125,21 @@ const asNumber = (value: number | string | null | undefined): number | null => {
 };
 
 const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
+  const parsedTicketDate =
+    parseDateValue(record.TicketDateTime) ?? parseDateValue(record.TicketDate);
+  const ticketDateDisplay = formatDateDisplay(parsedTicketDate);
+  const ticketDateIso = parsedTicketDate
+    ? parsedTicketDate.toISOString()
+    : null;
+  const ticketDateKey = ticketDateIso ? ticketDateIso.slice(0, 10) : "";
+
+  const qtyNumber = asNumber(record.Qty);
+  const unitPriceNumber = asNumber(record.UnitPrice);
+  const extendedCost =
+    qtyNumber !== null && unitPriceNumber !== null
+      ? qtyNumber * unitPriceNumber
+      : null;
+
   const ticketNo = asString(record.TicketNo);
   const uniqueId = asString(record.UniqueID);
   const itemNo = asString(record.ItemNo);
@@ -96,12 +161,17 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
     OrderID: asString(record.OrderID),
     ProductID: asString(record.ProductID),
     Description: asString(record.Description),
-    TicketDate: formatDate(record.TicketDate),
+    TicketDate: ticketDateKey,
+    TicketDateDisplay: ticketDateDisplay,
+    TicketDateTime: ticketDateIso,
     Unit: asString(record.Unit),
-    Qty: asNumber(record.Qty),
-    UnitPrice: asNumber(record.UnitPrice),
+    Qty: qtyNumber,
+    UnitPrice: unitPriceNumber,
+    ExtendedCost: extendedCost,
     JobName: asString(record.JobName),
-    AcctCode: "",
+    AcctCode: asString(record.TicketAccountCode),
+    OnHold: asNullableString(record.OnHold),
+    IsWorkingRow: Boolean(record.IsWorkingRow),
   };
 };
 
@@ -165,14 +235,18 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         name: "Unit Price",
         width: 120,
       },
+      {
+        key: "ExtendedCost",
+        name: "Extended Cost",
+        width: 140,
+      },
     ];
   }, []);
 
   const dateColumns = useMemo(() => new Set<TicketRowField>(["TicketDate"]), []);
-  const numericColumns = useMemo(
-    () => new Set<TicketRowField>(["Qty", "UnitPrice"]),
-    []
-  );
+  const numericColumns = useMemo(() => {
+    return new Set<TicketRowField>(["Qty", "UnitPrice", "ExtendedCost"]);
+  }, []);
   const columnKeys = useMemo(
     () => baseColumns.map((column) => column.key as TicketRowField),
     [baseColumns]
@@ -434,6 +508,12 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         ),
         renderCell: (cellProps: RenderCellProps<TicketRow>) => {
           const allowDrag = columnKey === "AcctCode";
+          const renderValue =
+            columnKey === "TicketDate"
+              ? () => cellProps.row.TicketDateDisplay ?? ""
+              : columnKey === "ExtendedCost"
+              ? () => formatCurrency(cellProps.row.ExtendedCost)
+              : undefined;
           return (
             <DraggableCell<TicketRow>
               {...cellProps}
@@ -442,6 +522,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
               onDropValue={handleCellValueDrop}
               canDrag={allowDrag}
               canDrop={allowDrag}
+              renderValue={renderValue}
             />
           );
         },
@@ -471,6 +552,16 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     "--rdg-header-draggable-background-color": "var(--gr-pistachio)",
     "--rdg-border-color": "color-mix(in srgb, var(--gr-grey-5) 45%, white)",
   } as CSSProperties;
+
+  const toolbarButtonBaseStyles: CSSProperties = {
+    background: "#B9BBB6",
+    backgroundColor: "#B9BBB6",
+    border: "1px solid color-mix(in srgb, #B9BBB6 70%, black)",
+    color: "#000000",
+    fontWeight: 700,
+    boxShadow: "none",
+    filter: "none",
+  };
 
   const handleRowsChange = useCallback(
     (updatedRows: TicketRow[], data: RowsChangeData<TicketRow>) => {
@@ -557,18 +648,21 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       return;
     }
 
-    const candidates = rows.filter(
-      (row) =>
+    const candidates = rows.filter((row) => {
+      const ticketDateValue = row.TicketDateTime ?? row.TicketDate;
+      return (
         row.TicketNo &&
         row.UniqueID &&
         row.ItemNo &&
         row.ProductID &&
         row.LocationID &&
         row.OrderID &&
-        row.TicketDate &&
+        ticketDateValue &&
+        String(ticketDateValue).trim().length > 0 &&
         row.AcctCode &&
         row.AcctCode.trim().length > 0
-    );
+      );
+    });
 
     if (candidates.length === 0) {
       setSaveError("No rows with an account code to save.");
@@ -588,8 +682,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         ProductID: row.ProductID,
         LocationID: row.LocationID,
         OrderID: row.OrderID,
-        TicketDate: row.TicketDate,
+        TicketDate: row.TicketDateTime ?? row.TicketDate,
         TicketAccountCode: row.AcctCode.trim(),
+        OnHold: row.OnHold ?? undefined,
       }));
 
       const response = await fetch("/api/tickets/save", {
@@ -658,15 +753,11 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           onClick={handleRetrieve}
           disabled={isLoading}
           className="px-4 py-2 rounded-md font-medium"
-        style={{
-          backgroundColor: "#B9BBB6",
-          border: "1px solid color-mix(in srgb, #B9BBB6 70%, black)",
-          color: "#000000",
-          fontWeight: 700,
-          opacity: isLoading ? 0.7 : 1,
-          cursor: isLoading ? "not-allowed" : "pointer",
-        }}
-      >
+          style={{
+            ...toolbarButtonBaseStyles,
+            cursor: isLoading ? "not-allowed" : "pointer",
+          }}
+        >
           {isLoading ? "Retrieving..." : "Retrieve Tickets"}
         </button>
         <button
@@ -674,14 +765,10 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           onClick={handleSave}
           disabled={isLoading || isSaving || !hasSaveableRows}
           className="px-4 py-2 rounded-md font-medium"
-        style={{
-          backgroundColor: "#B9BBB6",
-          border: "1px solid color-mix(in srgb, #B9BBB6 70%, black)",
-          color: "#000000",
-          fontWeight: 700,
-          cursor: isLoading || isSaving || !hasSaveableRows ? "not-allowed" : "pointer",
-          opacity: isLoading || isSaving || !hasSaveableRows ? 0.7 : 1,
-        }}
+          style={{
+            ...toolbarButtonBaseStyles,
+            cursor: isLoading || isSaving || !hasSaveableRows ? "not-allowed" : "pointer",
+          }}
         >
           {isSaving ? "Saving..." : "Save Tickets"}
         </button>
@@ -690,14 +777,10 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           onClick={handleReset}
           disabled={isLoading}
           className="px-4 py-2 rounded-md font-medium"
-        style={{
-          backgroundColor: "#B9BBB6",
-          border: "1px solid color-mix(in srgb, #B9BBB6 70%, black)",
-          color: "#000000",
-          fontWeight: 700,
-          cursor: isLoading ? "not-allowed" : "pointer",
-          opacity: isLoading ? 0.7 : 1,
-        }}
+          style={{
+            ...toolbarButtonBaseStyles,
+            cursor: isLoading ? "not-allowed" : "pointer",
+          }}
         >
           Reset Filters
         </button>
