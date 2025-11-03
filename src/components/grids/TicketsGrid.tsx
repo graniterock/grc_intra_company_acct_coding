@@ -413,6 +413,16 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [rows]
   );
 
+  const saveStatus = useMemo(() => {
+    if (saveError) {
+      return { message: saveError, tone: "error" as const };
+    }
+    if (saveMessage) {
+      return { message: saveMessage, tone: "success" as const };
+    }
+    return null;
+  }, [saveError, saveMessage]);
+
   const handleFilterChange = useCallback(
     (key: TicketRowField, value: string) => {
       setFilters((prev) => {
@@ -784,31 +794,54 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         >
           Reset Filters
         </button>
-        <div
-          className="flex items-center gap-2 text-sm"
-          style={{ color: "var(--gr-orange)" }}
-          aria-live="polite"
-        >
-          <span>
-            Total rows: <span className="font-semibold">{totalRowCount}</span>
-          </span>
-          <span aria-hidden="true">|</span>
-          <span>
-            Filtered rows: <span className="font-semibold">{filteredRowCount}</span>
-          </span>
+        <div className="flex items-center gap-3 flex-wrap flex-1">
+          <div
+            className="flex items-center gap-2 text-sm"
+            style={{ color: "var(--gr-orange)" }}
+            aria-live="polite"
+          >
+            <span>
+              Total rows: <span className="font-semibold">{totalRowCount}</span>
+            </span>
+            <span aria-hidden="true">|</span>
+            <span>
+              Filtered rows: <span className="font-semibold">{filteredRowCount}</span>
+            </span>
+          </div>
+          {saveStatus ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="text-sm font-medium px-3 py-2 rounded-md border"
+              style={{
+                minWidth: "200px",
+                textAlign: "center",
+                marginLeft: "auto",
+                backgroundColor:
+                  saveStatus.tone === "error"
+                    ? "var(--gr-status-error-bg, #fdecec)"
+                    : "var(--gr-status-success-bg, #ecf8f3)",
+                color:
+                  saveStatus.tone === "error"
+                    ? "var(--gr-error, #b00020)"
+                    : "var(--gr-green-dark, #0c5132)",
+                borderColor:
+                  saveStatus.tone === "error"
+                    ? "var(--gr-error, #b00020)"
+                    : "var(--gr-green-dark, #0c5132)",
+                boxShadow:
+                  saveStatus.tone === "error"
+                    ? "0 0 0 1px rgba(176, 0, 32, 0.08)"
+                    : "0 0 0 1px rgba(12, 81, 50, 0.08)",
+              }}
+            >
+              {saveStatus.message}
+            </div>
+          ) : null}
         </div>
         {loadError ? (
           <span className="text-sm" style={{ color: "var(--gr-error, #b00020)" }}>
             {loadError}
-          </span>
-        ) : null}
-        {saveError ? (
-          <span className="text-sm" style={{ color: "var(--gr-error, #b00020)" }}>
-            {saveError}
-          </span>
-        ) : saveMessage ? (
-          <span className="text-sm" style={{ color: "var(--gr-green-dark, #0c5132)" }}>
-            {saveMessage}
           </span>
         ) : null}
       </div>
