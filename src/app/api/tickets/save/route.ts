@@ -109,10 +109,10 @@ export async function POST(request: Request) {
 
     const normalizedRows = body.rows.map(normalizeRow);
 
-    await saveTicketAccountCodes(normalizedRows);
+    const savedCount = await saveTicketAccountCodes(normalizedRows);
 
     return NextResponse.json({
-      saved: normalizedRows.length,
+      saved: savedCount,
     });
   } catch (error) {
     const message =
