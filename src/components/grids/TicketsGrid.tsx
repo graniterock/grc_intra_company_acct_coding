@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { DataGrid, type Column, type SortColumn } from "react-data-grid";
 import type { FillEvent, RenderCellProps, RowsChangeData } from "react-data-grid";
@@ -66,6 +66,7 @@ type TicketsGridProps = {
 
 const NO_ACCT_FILTER_VALUE = "No Acct";
 const NO_ACCT_FILTER_VALUE_NORMALIZED = NO_ACCT_FILTER_VALUE.toLowerCase();
+const COLUMN_ORDER_STORAGE_KEY = "grc:tickets-grid-column-order";
 
 const parseDateValue = (
   value: TicketApiRow["TicketDate"] | TicketApiRow["TicketDateTime"]
@@ -181,6 +182,9 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
 export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [rows, setRows] = useState<TicketRow[]>([]);
   const [filters, setFilters] = useState<Partial<Record<TicketRowField, string>>>({});
+  const [jobFilter, setJobFilter] = useState("");
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [orderFilter, setOrderFilter] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sortColumns, setSortColumns] = useState<SortColumn[]>([]);
@@ -197,16 +201,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     return [
       { key: "TicketNo", name: "Ticket #", width: 140, resizable: true },
       { key: "LocationID", name: "Location", width: 108 },
-      { key: "JobNumber", name: "Job #", width: 124 },
-      {
-        key: "JobName",
-        name: "Job Name",
-        width: 220,
-        minWidth: 200,
-        resizable: true,
-      },
-      { key: "CustomerID", name: "Customer #", width: 140 },
-      { key: "OrderID", name: "Order #", width: 140 },
       { key: "ProductID", name: "Product #", width: 140 },
       {
         key: "Description",
@@ -255,10 +249,163 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [baseColumns]
   );
 
+  const columnKeySet = useMemo(
+    () => new Set<TicketRowField>(columnKeys),
+    [columnKeys]
+  );
+
+  const [columnOrder, setColumnOrder] = useState<TicketRowField[]>(() => [
+    ...columnKeys,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem(COLUMN_ORDER_STORAGE_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return;
+      const valid: TicketRowField[] = [];
+      for (const key of parsed) {
+        if (typeof key === "string") {
+          const typedKey = key as TicketRowField;
+          if (columnKeySet.has(typedKey) && !valid.includes(typedKey)) {
+            valid.push(typedKey);
+          }
+        }
+      }
+      if (valid.length === 0) return;
+      const merged = [...valid];
+      columnKeys.forEach((key) => {
+        if (!merged.includes(key)) {
+          merged.push(key);
+        }
+      });
+      setColumnOrder((prev) => {
+        if (
+          prev.length === merged.length &&
+          prev.every((key, index) => key === merged[index])
+        ) {
+          return prev;
+        }
+        return merged;
+      });
+    } catch {
+      // ignore malformed storage
+    }
+  }, [columnKeySet, columnKeys]);
+
+  useEffect(() => {
+    setColumnOrder((prev) => {
+      const sanitized = prev.filter((key) => columnKeySet.has(key));
+      const missing = columnKeys.filter((key) => !sanitized.includes(key));
+      if (missing.length === 0 && sanitized.length === prev.length) {
+        return prev;
+      }
+      return [...sanitized, ...missing];
+    });
+  }, [columnKeySet, columnKeys]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!columnKeys.every((key) => columnOrder.includes(key))) return;
+    window.localStorage.setItem(
+      COLUMN_ORDER_STORAGE_KEY,
+      JSON.stringify(columnOrder)
+    );
+  }, [columnOrder, columnKeys]);
+
+  const normalizedRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        job: row.JobNumber.trim(),
+        customer: row.CustomerID.trim(),
+        order: row.OrderID.trim(),
+      })),
+    [rows]
+  );
+
+  const jobNameLookup = useMemo(() => {
+    const map = new Map<string, string>();
+    rows.forEach((row) => {
+      const jobNumber = row.JobNumber.trim();
+      if (!jobNumber || map.has(jobNumber)) return;
+      map.set(jobNumber, row.JobName);
+    });
+    return map;
+  }, [rows]);
+
+  const jobOptions = useMemo(() => {
+    const customerCriterion = customerFilter.trim();
+    const orderCriterion = orderFilter.trim();
+    const set = new Set<string>();
+    normalizedRows.forEach((row) => {
+      if (customerCriterion && row.customer !== customerCriterion) return;
+      if (orderCriterion && row.order !== orderCriterion) return;
+      if (row.job) {
+        set.add(row.job);
+      }
+    });
+    return Array.from(set).sort(collator.compare);
+  }, [normalizedRows, collator, customerFilter, orderFilter]);
+
+  const customerOptions = useMemo(() => {
+    const jobCriterion = jobFilter.trim();
+    const orderCriterion = orderFilter.trim();
+    const set = new Set<string>();
+    normalizedRows.forEach((row) => {
+      if (jobCriterion && row.job !== jobCriterion) return;
+      if (orderCriterion && row.order !== orderCriterion) return;
+      if (row.customer) {
+        set.add(row.customer);
+      }
+    });
+    return Array.from(set).sort(collator.compare);
+  }, [normalizedRows, collator, jobFilter, orderFilter]);
+
+  const orderOptions = useMemo(() => {
+    const jobCriterion = jobFilter.trim();
+    const customerCriterion = customerFilter.trim();
+    const set = new Set<string>();
+    normalizedRows.forEach((row) => {
+      if (jobCriterion && row.job !== jobCriterion) return;
+      if (customerCriterion && row.customer !== customerCriterion) return;
+      if (row.order) {
+        set.add(row.order);
+      }
+    });
+    return Array.from(set).sort(collator.compare);
+  }, [normalizedRows, collator, jobFilter, customerFilter]);
+
+  const selectedJobName = jobFilter
+    ? jobNameLookup.get(jobFilter.trim()) ?? ""
+    : "";
+
+  const matchesTopLevelFilters = useCallback(
+    (row: TicketRow) => {
+      const jobCriterion = jobFilter.trim();
+      if (jobCriterion && row.JobNumber.trim() !== jobCriterion) {
+        return false;
+      }
+      const customerCriterion = customerFilter.trim();
+      if (customerCriterion && row.CustomerID.trim() !== customerCriterion) {
+        return false;
+      }
+      const orderCriterion = orderFilter.trim();
+      if (orderCriterion && row.OrderID.trim() !== orderCriterion) {
+        return false;
+      }
+      return true;
+    },
+    [jobFilter, customerFilter, orderFilter]
+  );
+
   const columnOptions = useMemo(() => {
     const filterEntries = (Object.entries(filters) as Array<[TicketRowField, string]>).filter(
       ([, value]) => Boolean(value)
     );
+
+    const baseRows = rows.filter(matchesTopLevelFilters);
 
     const matchesFilter = (
       row: TicketRow,
@@ -295,8 +442,8 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
 
       const relevantRows =
         otherFilters.length === 0
-          ? rows
-          : rows.filter((row) =>
+          ? baseRows
+          : baseRows.filter((row) =>
               otherFilters.every(([key, filterValue]) => matchesFilter(row, key, filterValue))
             );
 
@@ -330,13 +477,16 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     });
 
     return optionsMap;
-  }, [rows, columnKeys, filters, dateColumns, collator]);
+  }, [rows, columnKeys, filters, dateColumns, collator, matchesTopLevelFilters]);
 
   const rowKeyGetter = useCallback((row: TicketRow) => row.id, []);
 
   const filteredRows = useMemo(() => {
-    if (Object.keys(filters).length === 0) return rows;
-    return rows.filter((row) =>
+    const rowsWithTopLevelFilters =
+      jobFilter || customerFilter || orderFilter ? rows.filter(matchesTopLevelFilters) : rows;
+
+    if (Object.keys(filters).length === 0) return rowsWithTopLevelFilters;
+    return rowsWithTopLevelFilters.filter((row) =>
       (Object.entries(filters) as Array<[TicketRowField, string]>).every(
         ([key, filterValue]) => {
           if (!filterValue) return true;
@@ -361,7 +511,15 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         }
       )
     );
-  }, [rows, filters, dateColumns]);
+  }, [
+    rows,
+    filters,
+    dateColumns,
+    matchesTopLevelFilters,
+    jobFilter,
+    customerFilter,
+    orderFilter,
+  ]);
 
   const sortedRows = useMemo(() => {
     if (sortColumns.length === 0) return filteredRows;
@@ -434,10 +592,17 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     setSortColumns([]);
     setSaveError(null);
     setSaveMessage(null);
+    setJobFilter("");
+    setCustomerFilter("");
+    setOrderFilter("");
   }, []);
 
   const totalRowCount = rows.length;
-  const activeFilterCount = Object.keys(filters).length;
+  const topLevelFilterCount =
+    (jobFilter.trim() ? 1 : 0) +
+    (customerFilter.trim() ? 1 : 0) +
+    (orderFilter.trim() ? 1 : 0);
+  const activeFilterCount = Object.keys(filters).length + topLevelFilterCount;
   const filteredRowCount = activeFilterCount > 0 ? filteredRows.length : 0;
   const hasSaveableRows = useMemo(
     () =>
@@ -534,14 +699,60 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [rowKeyGetter, visibleRowKeys]
   );
 
-  const columns = useMemo(() => {
-    return baseColumns.map((column, columnIndex) => {
-      const columnKey = column.key as TicketRowField;
+  const handleColumnsReorder = useCallback(
+    (sourceKey: string, targetKey: string) => {
+      const source = sourceKey as TicketRowField;
+      const target = targetKey as TicketRowField;
+      if (!columnKeySet.has(source) || !columnKeySet.has(target)) {
+        return;
+      }
+      setColumnOrder((prev) => {
+        const current = prev.filter((key) => columnKeySet.has(key));
+        const sourceIndex = current.indexOf(source);
+        if (sourceIndex === -1) return prev;
+        const updated = [...current];
+        const [moved] = updated.splice(sourceIndex, 1);
+        const nextTargetIndex = updated.indexOf(target);
+        if (nextTargetIndex === -1) {
+          updated.push(moved);
+        } else {
+          updated.splice(nextTargetIndex, 0, moved);
+        }
+        columnKeys.forEach((key) => {
+          if (!updated.includes(key)) {
+            updated.push(key);
+          }
+        });
+        if (
+          updated.length === prev.length &&
+          updated.every((key, index) => key === prev[index])
+        ) {
+          return prev;
+        }
+        return updated;
+      });
+    },
+    [columnKeySet, columnKeys]
+  );
 
-      const inputType: FilterInputType = dateColumns.has(columnKey)
-        ? "date"
-        : numericColumns.has(columnKey)
-        ? "number"
+  const baseColumnMap = useMemo(() => {
+    const map = new Map<TicketRowField, Column<TicketRow>>();
+    baseColumns.forEach((column) => {
+      map.set(column.key as TicketRowField, column);
+    });
+    return map;
+  }, [baseColumns]);
+
+  const columns = useMemo(() => {
+    return columnOrder
+      .map((columnKey, columnIndex) => {
+        const column = baseColumnMap.get(columnKey);
+        if (!column) return null;
+
+        const inputType: FilterInputType = dateColumns.has(columnKey)
+          ? "date"
+          : numericColumns.has(columnKey)
+          ? "number"
         : "text";
       const sortEntry = sortColumns.find((entry) => entry.columnKey === columnKey);
 
@@ -580,15 +791,20 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           );
         },
       };
-    });
+    })
+      .filter(
+        (column): column is Column<TicketRow> =>
+          column !== null
+      );
   }, [
-    baseColumns,
+    baseColumnMap,
     columnOptions,
     dateColumns,
     filters,
     handleCellValueDrop,
     handleFilterChange,
     numericColumns,
+    columnOrder,
     rowKeyGetter,
     sortColumns,
     toggleSortColumn,
@@ -686,6 +902,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       const mapped = data.rows.map((record, index) => toTicketRow(record, index));
       setRows(mapped);
       setFilters({});
+      setJobFilter("");
+      setCustomerFilter("");
+      setOrderFilter("");
       setSaveMessage(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unexpected error");
@@ -884,6 +1103,93 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           </span>
         ) : null}
       </div>
+      <div
+        className="flex flex-wrap items-center gap-4 text-sm"
+        style={{
+          color: "var(--gr-ink)",
+          backgroundColor: "#85A63F",
+          padding: "10px 14px",
+          borderRadius: 0,
+          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
+        }}
+      >
+        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
+          Job #
+          <input
+            list="tickets-job-filter-options"
+            value={jobFilter}
+            onChange={(event) => setJobFilter(event.target.value)}
+            placeholder="All jobs"
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 500,
+              padding: "4px 8px",
+              borderRadius: 6,
+              border: "1px solid rgba(0, 0, 0, 0.18)",
+              backgroundColor: "var(--gr-surface)",
+              color: "var(--gr-ink)",
+              minWidth: 140,
+            }}
+          />
+          <datalist id="tickets-job-filter-options">
+            {jobOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </label>
+        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
+          Customer #
+          <input
+            list="tickets-customer-filter-options"
+            value={customerFilter}
+            onChange={(event) => setCustomerFilter(event.target.value)}
+            placeholder="All customers"
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 500,
+              padding: "4px 8px",
+              borderRadius: 6,
+              border: "1px solid rgba(0, 0, 0, 0.18)",
+              backgroundColor: "var(--gr-surface)",
+              color: "var(--gr-ink)",
+              minWidth: 140,
+            }}
+          />
+          <datalist id="tickets-customer-filter-options">
+            {customerOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </label>
+        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
+          Order #
+          <input
+            list="tickets-order-filter-options"
+            value={orderFilter}
+            onChange={(event) => setOrderFilter(event.target.value)}
+            placeholder="All orders"
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 500,
+              padding: "4px 8px",
+              borderRadius: 6,
+              border: "1px solid rgba(0, 0, 0, 0.18)",
+              backgroundColor: "var(--gr-surface)",
+              color: "var(--gr-ink)",
+              minWidth: 140,
+            }}
+          />
+          <datalist id="tickets-order-filter-options">
+            {orderOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        </label>
+        <div className="flex items-center gap-2" style={{ fontWeight: 600 }}>
+          <span>Job Name:</span>
+          <span style={{ fontWeight: 700 }}>{selectedJobName || "\u2014"}</span>
+        </div>
+      </div>
       <div className="flex-1 min-h-0 w-full">
         <DataGrid<TicketRow>
           columns={columns}
@@ -892,7 +1198,8 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           rowKeyGetter={rowKeyGetter}
           sortColumns={sortColumns}
           onSortColumnsChange={setSortColumns}
-          defaultColumnOptions={{ resizable: true }}
+          defaultColumnOptions={{ resizable: true, draggable: true }}
+          onColumnsReorder={handleColumnsReorder}
           /* Drag-to-fill (TS-safe cast of RDG FillEvent) */
           onFill={(event: FillEvent<TicketRow>) => {
             const columnKey = event.columnKey as TicketRowField;
