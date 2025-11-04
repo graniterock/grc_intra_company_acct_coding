@@ -57,6 +57,65 @@ if (instanceName) {
 
 let pool: ConnectionPool | null = null;
 
+const UPSERT_WORKING_TO_TEST_PROCEDURE =
+  "dbo.GRC_Upsert_Intra_Ticket_AccountCode_Working_To_TEST";
+
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const extractSavedRowCount = (
+  result: sql.IProcedureResult<unknown>
+): number | null => {
+  const returnValue = toFiniteNumber(result.returnValue);
+  if (returnValue !== null) {
+    return returnValue;
+  }
+
+  const scanRecord = (record: unknown): number | null => {
+    if (!record || typeof record !== "object") {
+      return null;
+    }
+    for (const value of Object.values(record as Record<string, unknown>)) {
+      const numeric = toFiniteNumber(value);
+      if (numeric !== null) {
+        return numeric;
+      }
+    }
+    return null;
+  };
+
+  if (Array.isArray(result.recordset)) {
+    for (const entry of result.recordset) {
+      const numeric = scanRecord(entry);
+      if (numeric !== null) {
+        return numeric;
+      }
+    }
+  }
+
+  if (Array.isArray(result.recordsets)) {
+    for (const set of result.recordsets) {
+      if (!Array.isArray(set)) continue;
+      for (const entry of set) {
+        const numeric = scanRecord(entry);
+        if (numeric !== null) {
+          return numeric;
+        }
+      }
+    }
+  }
+
+  return null;
+};
+
 const TICKETS_QUERY = `
 ;WITH base_src AS (
     SELECT
@@ -242,7 +301,7 @@ final_rows AS (
       ON m.TicketNo = e.TicketNo
      AND m.UniqueID = e.UniqueID
 ),
-working_rows AS (
+annotated AS (
     SELECT
         fr.TicketNo,
         fr.UniqueID,
@@ -259,100 +318,40 @@ working_rows AS (
         fr.UnitPrice,
         fr.JobName,
         fr.SourceRank,
-        w.Ticket_AccountCode,
-        w.OnHold,
-        CONVERT(datetime2(0), w.Ticket_DateTime) AS TicketDateTime,
-        CAST(1 AS bit) AS IsWorkingRow
-    FROM dbo.GRC_Intra_Ticket_AccountCode_Working AS w
-    INNER JOIN final_rows AS fr
-        ON fr.TicketNo = w.TicketNo
-       AND fr.UniqueID = w.TicketUniqueID
-       AND fr.ItemNo = w.TicketItemNo
-       AND fr.ProductID = w.ProductID
-       AND fr.LocationID = w.LocationID
-       AND fr.OrderID = w.OrderID
-       AND CONVERT(datetime2(0), fr.TicketDate) = CONVERT(datetime2(0), w.Ticket_DateTime)
-),
-base_only AS (
-    SELECT
-        fr.TicketNo,
-        fr.UniqueID,
-        fr.ItemNo,
-        fr.LocationID,
-        fr.JobNumber,
-        fr.CustomerID,
-        fr.OrderID,
-        fr.ProductID,
-        fr.Description,
-        fr.TicketDate,
-        fr.Unit,
-        fr.Qty,
-        fr.UnitPrice,
-        fr.JobName,
-        fr.SourceRank,
-        NULL AS Ticket_AccountCode,
-        NULL AS OnHold,
-        CONVERT(datetime2(0), fr.TicketDate) AS TicketDateTime,
-        CAST(0 AS bit) AS IsWorkingRow
+        COALESCE(
+            w.Ticket_AccountCode,
+            t.Ticket_AccountCode
+        ) AS Ticket_AccountCode,
+        CASE
+            WHEN w.TicketNo IS NOT NULL THEN w.OnHold
+            ELSE t.OnHold
+        END AS OnHold,
+        COALESCE(
+            CONVERT(datetime2(0), w.Ticket_DateTime),
+            CONVERT(datetime2(0), t.Ticket_DateTime),
+            CONVERT(datetime2(0), fr.TicketDate)
+        ) AS TicketDateTime,
+        CASE
+            WHEN w.TicketNo IS NOT NULL THEN CAST(1 AS bit)
+            ELSE CAST(0 AS bit)
+        END AS IsWorkingRow
     FROM final_rows AS fr
-    WHERE NOT EXISTS (
-        SELECT 1
-        FROM dbo.GRC_Intra_Ticket_AccountCode_Working AS w
-        WHERE w.TicketNo = fr.TicketNo
-          AND w.TicketUniqueID = fr.UniqueID
-          AND w.TicketItemNo = fr.ItemNo
-          AND w.ProductID = fr.ProductID
-          AND w.LocationID = fr.LocationID
-          AND w.OrderID = fr.OrderID
-          AND CONVERT(datetime2(0), w.Ticket_DateTime) = CONVERT(datetime2(0), fr.TicketDate)
-    )
-),
-combined AS (
-    SELECT
-        TicketNo,
-        UniqueID,
-        ItemNo,
-        LocationID,
-        JobNumber,
-        CustomerID,
-        OrderID,
-        ProductID,
-        Description,
-        TicketDate,
-        Unit,
-        Qty,
-        UnitPrice,
-        JobName,
-        Ticket_AccountCode,
-        OnHold,
-        TicketDateTime,
-        IsWorkingRow,
-        SourceRank
-    FROM working_rows
-
-    UNION ALL
-
-    SELECT
-        TicketNo,
-        UniqueID,
-        ItemNo,
-        LocationID,
-        JobNumber,
-        CustomerID,
-        OrderID,
-        ProductID,
-        Description,
-        TicketDate,
-        Unit,
-        Qty,
-        UnitPrice,
-        JobName,
-        Ticket_AccountCode,
-        OnHold,
-        TicketDateTime,
-        IsWorkingRow,
-        SourceRank
-    FROM base_only
+    LEFT JOIN dbo.GRC_Intra_Ticket_AccountCode_Working AS w
+        ON w.TicketNo = fr.TicketNo
+       AND w.TicketUniqueID = fr.UniqueID
+       AND w.TicketItemNo = fr.ItemNo
+       AND w.ProductID = fr.ProductID
+       AND w.LocationID = fr.LocationID
+       AND w.OrderID = fr.OrderID
+       AND CONVERT(date, w.Ticket_DateTime) = CONVERT(date, fr.TicketDate)
+    LEFT JOIN dbo.GRC_Intra_Ticket_AccountCode_TEST AS t
+        ON t.TicketNo = fr.TicketNo
+       AND t.TicketUniqueID = fr.UniqueID
+       AND t.TicketItemNo = fr.ItemNo
+       AND t.ProductID = fr.ProductID
+       AND t.LocationID = fr.LocationID
+       AND t.OrderID = fr.OrderID
+       AND CONVERT(date, t.Ticket_DateTime) = CONVERT(date, fr.TicketDate)
 )
 SELECT
     TicketNo,
@@ -373,7 +372,7 @@ SELECT
     OnHold,
     IsWorkingRow,
     TicketDateTime
-FROM combined
+FROM annotated
 ORDER BY
     TicketNo,
     TicketDateTime,
@@ -453,9 +452,9 @@ const resolveWindowsUser = (): string => {
 
 export async function saveTicketAccountCodes(
   rows: TicketAccountCodeInput[]
-): Promise<void> {
+): Promise<number> {
   if (rows.length === 0) {
-    return;
+    return 0;
   }
 
   const connection = await getPool();
@@ -464,6 +463,8 @@ export async function saveTicketAccountCodes(
 
   const now = new Date();
   const lastUpdatedBy = resolveWindowsUser();
+
+  let processedCount = 0;
 
   try {
     for (const row of rows) {
@@ -528,6 +529,8 @@ export async function saveTicketAccountCodes(
           );
         END
       `);
+
+      processedCount += 1;
     }
 
     await transaction.commit();
@@ -537,4 +540,22 @@ export async function saveTicketAccountCodes(
     });
     throw error;
   }
+
+  try {
+    const result = await connection
+      .request()
+      .execute(UPSERT_WORKING_TO_TEST_PROCEDURE);
+    const savedCount = extractSavedRowCount(result);
+    if (savedCount !== null) {
+      return savedCount;
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown error occurred.";
+    throw new Error(
+      `Unable to finalize ticket account code changes: ${message}`
+    );
+  }
+
+  return processedCount;
 }

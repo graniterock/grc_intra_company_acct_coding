@@ -64,6 +64,9 @@ type TicketsGridProps = {
   height?: number | string;
 };
 
+const NO_ACCT_FILTER_VALUE = "No Acct";
+const NO_ACCT_FILTER_VALUE_NORMALIZED = NO_ACCT_FILTER_VALUE.toLowerCase();
+
 const parseDateValue = (
   value: TicketApiRow["TicketDate"] | TicketApiRow["TicketDateTime"]
 ): Date | null => {
@@ -262,6 +265,18 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       key: TicketRowField,
       filterValue: string
     ): boolean => {
+      if (!filterValue) return true;
+
+      const normalizedFilter = filterValue.trim().toLowerCase();
+      if (key === "AcctCode" && normalizedFilter === NO_ACCT_FILTER_VALUE_NORMALIZED) {
+        const rawValue = row[key];
+        const normalizedValue =
+          rawValue === undefined || rawValue === null
+            ? ""
+            : String(rawValue).trim();
+        return normalizedValue === "";
+      }
+
       const cellValue = row[key];
       if (cellValue === undefined || cellValue === null) return false;
 
@@ -286,13 +301,32 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             );
 
       const valueSet = new Set<string>();
+      let includeNoAcctOption = false;
       relevantRows.forEach((row) => {
         const value = row[columnKey];
-        if (value === undefined || value === null || value === "") return;
-        valueSet.add(String(value));
+        const normalizedValue =
+          value === undefined || value === null ? "" : String(value).trim();
+        if (normalizedValue === "") {
+          if (columnKey === "AcctCode") {
+            includeNoAcctOption = true;
+          }
+          return;
+        }
+        valueSet.add(normalizedValue);
       });
 
-      optionsMap.set(columnKey, Array.from(valueSet).sort(collator.compare));
+      const sortedOptions = Array.from(valueSet).sort(collator.compare);
+      if (columnKey === "AcctCode" && includeNoAcctOption) {
+        const existingIndex = sortedOptions.findIndex(
+          (option) => option.toLowerCase() === NO_ACCT_FILTER_VALUE_NORMALIZED
+        );
+        if (existingIndex !== -1) {
+          sortedOptions.splice(existingIndex, 1);
+        }
+        sortedOptions.unshift(NO_ACCT_FILTER_VALUE);
+      }
+
+      optionsMap.set(columnKey, sortedOptions);
     });
 
     return optionsMap;
@@ -306,6 +340,15 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       (Object.entries(filters) as Array<[TicketRowField, string]>).every(
         ([key, filterValue]) => {
           if (!filterValue) return true;
+
+          const normalizedFilter = filterValue.trim().toLowerCase();
+          if (key === "AcctCode" && normalizedFilter === NO_ACCT_FILTER_VALUE_NORMALIZED) {
+            const rawValue = row[key];
+            const normalizedValue =
+              rawValue === undefined || rawValue === null ? "" : String(rawValue).trim();
+            return normalizedValue === "";
+          }
+
           const cellValue = row[key];
           if (cellValue === undefined || cellValue === null) return false;
 
@@ -730,11 +773,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
 
       const result = (await response.json()) as { saved?: number };
       const savedCount = result?.saved ?? 0;
-      setSaveMessage(
-        savedCount > 0
-          ? `Saved ${savedCount} row${savedCount === 1 ? "" : "s"}.`
-          : "No rows were saved."
-      );
+      setSaveMessage(`Saved ${savedCount} row${savedCount === 1 ? "" : "s"}.`);
     } catch (error) {
       const message =
         error instanceof Error
