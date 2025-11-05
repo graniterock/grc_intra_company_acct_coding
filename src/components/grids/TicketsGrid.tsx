@@ -592,6 +592,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     setSortColumns([]);
     setSaveError(null);
     setSaveMessage(null);
+  }, []);
+
+  const handleClearTopFilters = useCallback(() => {
     setJobFilter("");
     setCustomerFilter("");
     setOrderFilter("");
@@ -602,6 +605,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     (jobFilter.trim() ? 1 : 0) +
     (customerFilter.trim() ? 1 : 0) +
     (orderFilter.trim() ? 1 : 0);
+  const hasTopFiltersApplied = topLevelFilterCount > 0;
   const activeFilterCount = Object.keys(filters).length + topLevelFilterCount;
   const filteredRowCount = activeFilterCount > 0 ? filteredRows.length : 0;
   const hasSaveableRows = useMemo(
@@ -1113,6 +1117,26 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
         }}
       >
+        <button
+          type="button"
+          onClick={handleClearTopFilters}
+          disabled={!hasTopFiltersApplied}
+          style={{
+            fontWeight: 600,
+            fontSize: "0.8rem",
+            padding: "6px 12px",
+            borderRadius: 6,
+            border: "1px solid rgba(0, 0, 0, 0.18)",
+            backgroundColor: hasTopFiltersApplied ? "var(--gr-surface)" : "rgba(255, 255, 255, 0.6)",
+            color: "var(--gr-ink)",
+            cursor: hasTopFiltersApplied ? "pointer" : "not-allowed",
+            opacity: hasTopFiltersApplied ? 1 : 0.6,
+            boxShadow: hasTopFiltersApplied ? "0 1px 4px rgba(0, 0, 0, 0.14)" : "none",
+            transition: "background-color 120ms ease, opacity 120ms ease",
+          }}
+        >
+          Reset Filters
+        </button>
         <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
           Job #
           <input
