@@ -432,6 +432,63 @@ export async function fetchTickets(): Promise<TicketRecord[]> {
   return results.recordset ?? [];
 }
 
+export type AccountCodeValidationResult = {
+  code: string;
+  isValid: boolean;
+  taskDesc: string;
+  acctDesc: string;
+};
+
+const ACCOUNT_CODE_TVP_TYPE = "dbo.AccountCodeValidationList";
+const ACCOUNT_CODE_PROC = "dbo.GRC_Intra_ValidateAccountCodes";
+
+const normalizeAccountCodeValue = (value: string): string =>
+  value.trim().toUpperCase();
+
+export async function validateAccountCodes(
+  codes: string[]
+): Promise<AccountCodeValidationResult[]> {
+  const sanitized = Array.from(
+    new Set(
+      codes
+        .map((code) => normalizeAccountCodeValue(code))
+        .filter((code) => code.length > 0)
+    )
+  );
+
+  if (sanitized.length === 0) {
+    return [];
+  }
+
+  const table = new sql.Table(ACCOUNT_CODE_TVP_TYPE);
+  table.create = false;
+  table.columns.add("acct_code", sql.NVarChar(20), { nullable: false });
+  sanitized.forEach((code) => {
+    table.rows.add(code);
+  });
+
+  const connection = await getPool();
+  const request = connection.request();
+  request.input("codes", table);
+
+  type RawValidationRow = {
+    acct_code: string;
+    isValid: boolean | number;
+    taskcode_description: string;
+    account_description: string;
+  };
+
+  const results = await request.execute<RawValidationRow>(ACCOUNT_CODE_PROC);
+  const rows = results.recordset ?? [];
+
+  return rows.map((row) => ({
+    code: normalizeAccountCodeValue(row.acct_code ?? ""),
+    isValid: row.isValid === true || row.isValid === 1,
+    taskDesc: row.taskcode_description ?? "",
+    acctDesc: row.account_description ?? "",
+  }));
+}
+
 const resolveWindowsUser = (): string => {
   try {
     const details = os.userInfo();

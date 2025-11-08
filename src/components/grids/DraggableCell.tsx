@@ -18,6 +18,7 @@ type DraggableCellProps<R> = RenderCellProps<R> & {
   renderValue?: (value: unknown) => ReactNode;
   canDrag?: boolean;
   canDrop?: boolean;
+  className?: string;
 };
 
 /**
@@ -34,6 +35,7 @@ export function DraggableCell<R>({
   renderValue,
   canDrag = true,
   canDrop = true,
+  className,
 }: DraggableCellProps<R>) {
   const columnKey = String(column.key);
   const cellValue = (row as Record<string, unknown>)[columnKey];
@@ -80,13 +82,18 @@ export function DraggableCell<R>({
     }
   };
 
+  const combinedClassName =
+    className && className.trim().length > 0
+      ? `rdg-draggable-cell ${className}`
+      : "rdg-draggable-cell";
+
   return (
     <div
       draggable={canDrag}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="rdg-draggable-cell"
+      className={combinedClassName}
       title={canDrag ? "Drag to copy this value into another cell" : undefined}
     >
       {renderValue ? renderValue(cellValue) : formatValue(cellValue)}
