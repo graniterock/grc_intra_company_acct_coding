@@ -1,14 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { DataGrid, type Column, type SortColumn } from "react-data-grid";
-import type { FillEvent, RenderCellProps, RowsChangeData } from "react-data-grid";
+import type {
+  FillEvent,
+  RenderCellProps,
+  RenderEditCellProps,
+  RowsChangeData,
+} from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
-import { TextEditor } from "./TextEditor";
+
+type AccountValidationStatus = "unknown" | "pending" | "valid" | "invalid";
 
 type TicketRow = {
   id: string;
@@ -30,13 +36,23 @@ type TicketRow = {
   ExtendedCost: number | null;
   JobName: string;
   AcctCode: string;
+  TaskDesc: string;
+  AcctDesc: string;
+  acctValidationStatus: AccountValidationStatus;
+  acctValidationCode: string | null;
   OnHold: string | null;
   IsWorkingRow: boolean;
 };
 
 type TicketRowField = Exclude<
   keyof TicketRow,
-  "id" | "TicketDateDisplay" | "TicketDateTime" | "OnHold" | "IsWorkingRow"
+  | "id"
+  | "TicketDateDisplay"
+  | "TicketDateTime"
+  | "OnHold"
+  | "IsWorkingRow"
+  | "acctValidationStatus"
+  | "acctValidationCode"
 >;
 
 type TicketApiRow = {
@@ -64,9 +80,66 @@ type TicketsGridProps = {
   height?: number | string;
 };
 
+type AccountCodeEditorProps = RenderEditCellProps<TicketRow> & {
+  onCommitBlur: (rowId: string, value: string) => void;
+};
+
+function AccountCodeEditor({
+  row,
+  column,
+  onRowChange,
+  onCommitBlur,
+}: AccountCodeEditorProps) {
+  const key = column.key as keyof TicketRow;
+  const value = row[key] as unknown as string | undefined;
+
+  const commit = (next: string, commitChanges = true) => {
+    onRowChange(
+      {
+        ...row,
+        [key]: (next as unknown) as TicketRow[typeof key],
+      },
+      commitChanges
+    );
+  };
+
+  return (
+    <input
+      autoFocus
+      type="text"
+      value={value ?? ""}
+      onChange={(event) => commit(event.target.value)}
+      onBlur={(event) => {
+        const next = event.target.value;
+        commit(next, true);
+        onCommitBlur(row.id, next);
+      }}
+      style={{
+        width: "100%",
+        height: "100%",
+        border: "none",
+        outline: "none",
+        padding: "0 8px",
+        backgroundColor: "transparent",
+        color: "inherit",
+      }}
+    />
+  );
+}
+
 const NO_ACCT_FILTER_VALUE = "No Acct";
 const NO_ACCT_FILTER_VALUE_NORMALIZED = NO_ACCT_FILTER_VALUE.toLowerCase();
 const COLUMN_ORDER_STORAGE_KEY = "grc:tickets-grid-column-order";
+const INVALID_ACCT_LABEL = "Invalid Acct";
+type AccountValidationResult = {
+  code: string;
+  isValid: boolean;
+  taskDesc: string;
+  acctDesc: string;
+};
+
+const normalizeAccountCode = (value: string): string =>
+  value.trim().toUpperCase();
 
 const parseDateValue = (
   value: TicketApiRow["TicketDate"] | TicketApiRow["TicketDateTime"]
@@ -174,6 +247,10 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
     ExtendedCost: extendedCost,
     JobName: asString(record.JobName),
     AcctCode: asString(record.TicketAccountCode),
+    TaskDesc: "",
+    AcctDesc: "",
+    acctValidationStatus: "unknown",
+    acctValidationCode: null,
     OnHold: asNullableString(record.OnHold),
     IsWorkingRow: Boolean(record.IsWorkingRow),
   };
@@ -191,9 +268,268 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [bulkValidationSignal, setBulkValidationSignal] = useState(0);
+  const initialRowsValidationTriggeredRef = useRef(false);
+  const lastBulkValidationScheduledRef = useRef(0);
 
   const collator = useMemo(
     () => new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }),
+    []
+  );
+
+
+  const dateColumns = useMemo(() => new Set<TicketRowField>(["TicketDate"]), []);
+  const numericColumns = useMemo(() => {
+    return new Set<TicketRowField>(["Qty", "UnitPrice", "ExtendedCost"]);
+  }, []);
+
+  const runValidationForRowIds = useCallback(
+    async (
+      rowIds: string[],
+      options: {
+        showSpinner?: boolean;
+        codeOverrides?: Map<string, string>;
+      } = {}
+    ) => {
+      if (rowIds.length === 0) {
+        return;
+      }
+
+      const rowIdSet = new Set(rowIds);
+      const overrides = options.codeOverrides;
+      const codesToValidate: string[] = [];
+
+      setValidationError(null);
+
+      setRows((prevRows) =>
+        prevRows.map((row) => {
+          if (!rowIdSet.has(row.id)) {
+            return row;
+          }
+
+          const override = overrides?.get(row.id);
+          const normalized = override ?? normalizeAccountCode(row.AcctCode ?? "");
+          if (normalized.length === 0) {
+            return {
+              ...row,
+              AcctCode: "",
+              TaskDesc: "",
+              AcctDesc: "",
+              acctValidationStatus: "valid" as AccountValidationStatus,
+              acctValidationCode: null,
+            };
+          }
+
+          codesToValidate.push(normalized);
+
+          return {
+            ...row,
+            AcctCode: normalized,
+            acctValidationStatus: "pending" as AccountValidationStatus,
+            acctValidationCode: normalized,
+          };
+        })
+      );
+
+      const uniqueCodeSet = new Set<string>();
+      codesToValidate.forEach((code) => {
+        if (code.length > 0) {
+          uniqueCodeSet.add(code);
+        }
+      });
+      if (overrides) {
+        for (const code of overrides.values()) {
+          const normalized = normalizeAccountCode(code ?? "");
+          if (normalized.length > 0) {
+            uniqueCodeSet.add(normalized);
+          }
+        }
+      }
+      const uniqueCodes = Array.from(uniqueCodeSet);
+      if (uniqueCodes.length === 0) {
+        setRows((prevRows) =>
+          prevRows.map((row) => {
+            if (!rowIdSet.has(row.id)) {
+              return row;
+            }
+            const normalized = normalizeAccountCode(row.AcctCode ?? "");
+            return {
+              ...row,
+              TaskDesc: normalized.length > 0 ? row.TaskDesc : "",
+              AcctDesc: normalized.length > 0 ? row.AcctDesc : "",
+              acctValidationStatus: "valid" as AccountValidationStatus,
+              acctValidationCode: normalized.length > 0 ? normalized : null,
+            };
+          })
+        );
+        return;
+      }
+
+      if (options.showSpinner) {
+        setIsValidating(true);
+      }
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+        const response = await fetch("/api/account/validate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ codes: uniqueCodes }),
+          signal: controller.signal,
+        });
+        window.clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const text = await response.text();
+          const trimmed = text.trim();
+          let message = `Unable to validate account codes (HTTP ${response.status}${
+            response.statusText ? ` ${response.statusText}` : ""
+          }).`;
+
+          if (trimmed) {
+            try {
+              const parsed = JSON.parse(trimmed) as { error?: string };
+              if (parsed?.error) {
+                message = parsed.error;
+              } else if (!/^<!doctype html/i.test(trimmed) && !/^<html/i.test(trimmed)) {
+                message = trimmed;
+              }
+            } catch {
+              if (!/^<!doctype html/i.test(trimmed) && !/^<html/i.test(trimmed)) {
+                message = trimmed;
+              }
+            }
+          }
+
+          throw new Error(message);
+        }
+
+        const payload = (await response.json()) as {
+          results?: AccountValidationResult[];
+          error?: string;
+        };
+
+        if (!payload.results) {
+          throw new Error(payload.error || "No validation results returned.");
+        }
+
+        const resultMap = new Map<string, AccountValidationResult>();
+        payload.results.forEach((result) => {
+          resultMap.set(normalizeAccountCode(result.code), result);
+        });
+
+        setRows((prevRows) =>
+          prevRows.map((row) => {
+            if (!rowIdSet.has(row.id)) {
+              return row;
+            }
+
+            const code = row.acctValidationCode;
+            if (!code) {
+              return row;
+            }
+
+            const lookup = resultMap.get(code);
+            if (!lookup) {
+              return {
+                ...row,
+                TaskDesc: INVALID_ACCT_LABEL,
+                AcctDesc: INVALID_ACCT_LABEL,
+                acctValidationStatus: "invalid" as AccountValidationStatus,
+                acctValidationCode: null,
+              };
+            }
+
+            if (!lookup.isValid) {
+              return {
+                ...row,
+                TaskDesc: lookup.taskDesc || INVALID_ACCT_LABEL,
+                AcctDesc: lookup.acctDesc || INVALID_ACCT_LABEL,
+                acctValidationStatus: "invalid" as AccountValidationStatus,
+                acctValidationCode: code,
+              };
+            }
+
+            return {
+              ...row,
+              TaskDesc: lookup.taskDesc,
+              AcctDesc: lookup.acctDesc,
+              acctValidationStatus: "valid" as AccountValidationStatus,
+              acctValidationCode: code,
+            };
+          })
+        );
+      } catch (error) {
+        const isAbort =
+          error instanceof DOMException && error.name === "AbortError";
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unable to validate account codes.";
+        setValidationError(
+          isAbort ? "Account validation timed out." : message
+        );
+        setRows((prevRows) =>
+          prevRows.map((row) => {
+            if (!rowIdSet.has(row.id)) {
+              return row;
+            }
+            if (row.acctValidationStatus !== "pending") {
+              return row;
+            }
+            return {
+              ...row,
+              acctValidationStatus: "unknown" as AccountValidationStatus,
+            };
+          })
+        );
+      } finally {
+        if (options.showSpinner) {
+          setIsValidating(false);
+        }
+      }
+    },
+    []
+  );
+
+  const handleAcctCodeBlur = useCallback(
+    (rowId: string, value: string) => {
+      const normalized = normalizeAccountCode(value ?? "");
+
+      setRows((prevRows) =>
+        prevRows.map((row) => {
+      if (row.id !== rowId) {
+        return row;
+      }
+
+      if (normalized.length === 0) {
+        return {
+          ...row,
+          AcctCode: "",
+          TaskDesc: "",
+          AcctDesc: "",
+          acctValidationStatus: "valid" as AccountValidationStatus,
+          acctValidationCode: null,
+        };
+      }
+
+      return {
+        ...row,
+        AcctCode: normalized,
+        TaskDesc: "",
+        AcctDesc: "",
+        acctValidationStatus: "unknown" as AccountValidationStatus,
+        acctValidationCode: normalized,
+      };
+    })
+      );
+
+    },
     []
   );
 
@@ -219,7 +555,21 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         name: "Acct Code",
         width: 160,
         editable: true,
-        renderEditCell: TextEditor<TicketRow>,
+        renderEditCell: (props: RenderEditCellProps<TicketRow>) => (
+          <AccountCodeEditor {...props} onCommitBlur={handleAcctCodeBlur} />
+        ),
+      },
+      {
+        key: "TaskDesc",
+        name: "TaskCode Description",
+        width: 220,
+        editable: false,
+      },
+      {
+        key: "AcctDesc",
+        name: "Account Description",
+        width: 220,
+        editable: false,
       },
       { key: "Unit", name: "Unit", width: 90 },
       {
@@ -238,12 +588,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         width: 140,
       },
     ];
-  }, []);
-
-  const dateColumns = useMemo(() => new Set<TicketRowField>(["TicketDate"]), []);
-  const numericColumns = useMemo(() => {
-    return new Set<TicketRowField>(["Qty", "UnitPrice", "ExtendedCost"]);
-  }, []);
+  }, [handleAcctCodeBlur]);
   const columnKeys = useMemo(
     () => baseColumns.map((column) => column.key as TicketRowField),
     [baseColumns]
@@ -561,6 +906,20 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [sortedRows, rowKeyGetter]
   );
 
+  const validateRow = useCallback(
+    async (row: TicketRow) => {
+      await runValidationForRowIds([row.id], { showSpinner: true });
+    },
+    [runValidationForRowIds]
+  );
+
+  const validateAllVisibleRows = useCallback(async () => {
+    if (visibleRowKeys.length === 0) {
+      return;
+    }
+    await runValidationForRowIds([...visibleRowKeys], { showSpinner: true });
+  }, [visibleRowKeys, runValidationForRowIds]);
+
   const toggleSortColumn = useCallback(
     (columnKey: TicketRowField, shiftKey: boolean) => {
       setSortColumns((prev) => {
@@ -592,6 +951,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     setSortColumns([]);
     setSaveError(null);
     setSaveMessage(null);
+    setValidationError(null);
   }, []);
 
   const handleClearTopFilters = useCallback(() => {
@@ -599,6 +959,89 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     setCustomerFilter("");
     setOrderFilter("");
   }, []);
+
+  const handleValidateVisible = useCallback(() => {
+    if (visibleRowKeys.length === 0) {
+      return;
+    }
+
+    if (visibleRowKeys.length === 1) {
+      const targetRow = sortedRows.find(
+        (row) => rowKeyGetter(row) === visibleRowKeys[0]
+      );
+      if (targetRow) {
+        void validateRow(targetRow);
+        return;
+      }
+    }
+
+    void validateAllVisibleRows();
+  }, [
+    visibleRowKeys,
+    sortedRows,
+    rowKeyGetter,
+    validateRow,
+    validateAllVisibleRows,
+  ]);
+
+  const requestBulkValidation = useCallback(() => {
+    setBulkValidationSignal((prev) => prev + 1);
+  }, []);
+
+  useEffect(() => {
+    if (bulkValidationSignal === 0) {
+      return;
+    }
+    if (rows.length === 0) {
+      return;
+    }
+    if (lastBulkValidationScheduledRef.current === bulkValidationSignal) {
+      return;
+    }
+
+    lastBulkValidationScheduledRef.current = bulkValidationSignal;
+
+    if (typeof window === "undefined") {
+      void validateAllVisibleRows();
+      return;
+    }
+
+    const rafHandles: number[] = [];
+    const scheduleValidation = () => {
+      const validateHandle = window.requestAnimationFrame(() => {
+        if (typeof queueMicrotask === "function") {
+          queueMicrotask(() => {
+            void validateAllVisibleRows();
+          });
+        } else {
+          void validateAllVisibleRows();
+        }
+      });
+      rafHandles.push(validateHandle);
+    };
+
+    const paintHandle = window.requestAnimationFrame(() => {
+      scheduleValidation();
+    });
+    rafHandles.push(paintHandle);
+
+    return () => {
+      rafHandles.forEach((handle) => {
+        window.cancelAnimationFrame(handle);
+      });
+    };
+  }, [bulkValidationSignal, rows.length, validateAllVisibleRows]);
+
+  useEffect(() => {
+    if (initialRowsValidationTriggeredRef.current) {
+      return;
+    }
+    if (rows.length === 0) {
+      return;
+    }
+    initialRowsValidationTriggeredRef.current = true;
+    requestBulkValidation();
+  }, [rows.length, requestBulkValidation]);
 
   const totalRowCount = rows.length;
   const topLevelFilterCount =
@@ -656,6 +1099,8 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         return;
       }
 
+      const affectedRowIds = new Set<string>();
+      const overrides = new Map<string, string>();
       setRows((prevRows) => {
         const sourceIndex = prevRows.findIndex(
           (row) => rowKeyGetter(row) === source.rowKey
@@ -677,6 +1122,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         }
 
         const sourceValue = prevRows[sourceIndex]?.AcctCode ?? "";
+        const normalizedSource = normalizeAccountCode(sourceValue ?? "");
         const startVisible = Math.min(sourceVisibleIndex, targetVisibleIndex);
         const endVisible = Math.max(sourceVisibleIndex, targetVisibleIndex);
         const keysToUpdate = new Set(
@@ -686,21 +1132,55 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         let didChange = false;
 
         const nextRows = prevRows.map((row) => {
-          if (!keysToUpdate.has(rowKeyGetter(row))) {
+          const rowKey = rowKeyGetter(row);
+          if (!keysToUpdate.has(rowKey)) {
             return row;
           }
-          if (row.AcctCode === sourceValue) {
+          if (row.AcctCode === normalizedSource) {
             return row;
           }
 
           didChange = true;
-          return { ...row, AcctCode: sourceValue };
+          affectedRowIds.add(rowKey);
+
+          if (normalizedSource.length === 0) {
+            return {
+              ...row,
+              AcctCode: "",
+              TaskDesc: "",
+              AcctDesc: "",
+              acctValidationStatus: "valid" as AccountValidationStatus,
+              acctValidationCode: null,
+            };
+          }
+
+          overrides.set(rowKey, normalizedSource);
+
+          return {
+            ...row,
+            AcctCode: normalizedSource,
+            TaskDesc: "",
+            AcctDesc: "",
+            acctValidationStatus: "unknown" as AccountValidationStatus,
+            acctValidationCode: normalizedSource,
+          };
         });
 
         return didChange ? nextRows : prevRows;
       });
+
+      if (affectedRowIds.size > 0) {
+        const ids = Array.from(affectedRowIds);
+        const overrideSnapshot = new Map(overrides);
+        window.setTimeout(() => {
+          void runValidationForRowIds(ids, {
+            codeOverrides: overrideSnapshot,
+            showSpinner: true,
+          });
+        }, 0);
+      }
     },
-    [rowKeyGetter, visibleRowKeys]
+    [rowKeyGetter, visibleRowKeys, runValidationForRowIds]
   );
 
   const handleColumnsReorder = useCallback(
@@ -747,7 +1227,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     return map;
   }, [baseColumns]);
 
-  const columns = useMemo(() => {
+const columns = useMemo(() => {
     return columnOrder
       .map((columnKey, columnIndex) => {
         const column = baseColumnMap.get(columnKey);
@@ -757,45 +1237,74 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           ? "date"
           : numericColumns.has(columnKey)
           ? "number"
-        : "text";
-      const sortEntry = sortColumns.find((entry) => entry.columnKey === columnKey);
+          : "text";
+        const sortEntry = sortColumns.find((entry) => entry.columnKey === columnKey);
 
-      return {
-        ...column,
-        sortable: false,
-        renderHeaderCell: () => (
-          <HeaderFilter
-            label={String(column.name)}
-            value={filters[columnKey] ?? ""}
-            type={inputType}
-            options={columnOptions.get(columnKey)}
-            onChange={(value) => handleFilterChange(columnKey, value)}
-            onLabelClick={(event) => toggleSortColumn(columnKey, event.shiftKey)}
-            sortDirection={sortEntry?.direction ?? null}
-          />
-        ),
-        renderCell: (cellProps: RenderCellProps<TicketRow>) => {
-          const allowDrag = columnKey === "AcctCode";
-          const renderValue =
-            columnKey === "TicketDate"
-              ? () => cellProps.row.TicketDateDisplay ?? ""
-              : columnKey === "ExtendedCost"
-              ? () => formatCurrency(cellProps.row.ExtendedCost)
-              : undefined;
-          return (
-            <DraggableCell<TicketRow>
-              {...cellProps}
-              columnIndex={columnIndex}
-              rowKey={rowKeyGetter(cellProps.row)}
-              onDropValue={handleCellValueDrop}
-              canDrag={allowDrag}
-              canDrop={allowDrag}
-              renderValue={renderValue}
+        return {
+          ...column,
+          sortable: false,
+          renderHeaderCell: () => (
+            <HeaderFilter
+              label={String(column.name)}
+              value={filters[columnKey] ?? ""}
+              type={inputType}
+              options={columnOptions.get(columnKey)}
+              onChange={(value) => handleFilterChange(columnKey, value)}
+              onLabelClick={(event) => toggleSortColumn(columnKey, event.shiftKey)}
+              sortDirection={sortEntry?.direction ?? null}
             />
-          );
-        },
-      };
-    })
+          ),
+          renderCell: (cellProps: RenderCellProps<TicketRow>) => {
+            const allowDrag = columnKey === "AcctCode";
+            const status = cellProps.row.acctValidationStatus;
+            const isAcctColumn = columnKey === "AcctCode";
+            const isTaskDescColumn = columnKey === "TaskDesc";
+            const isAcctDescColumn = columnKey === "AcctDesc";
+            const isValidationColumn =
+              isAcctColumn || isTaskDescColumn || isAcctDescColumn;
+
+            const renderValue =
+              columnKey === "TicketDate"
+                ? () => cellProps.row.TicketDateDisplay ?? ""
+                : columnKey === "ExtendedCost"
+                ? () => formatCurrency(cellProps.row.ExtendedCost)
+                : isAcctColumn
+                ? () => (
+                    <span className="flex items-center gap-2">
+                      {status === "pending" ? (
+                        <span
+                          aria-hidden="true"
+                          className="inline-block h-3 w-3 rounded-full border-2 border-red-200 border-t-red-500 animate-spin"
+                        />
+                      ) : null}
+                      <span>{cellProps.row.AcctCode}</span>
+                    </span>
+                  )
+                : undefined;
+
+            const extraClasses: string[] = [];
+            if (status === "invalid" && isValidationColumn) {
+              extraClasses.push("bg-red-100", "text-red-800");
+            }
+            if (status === "pending" && isValidationColumn) {
+              extraClasses.push("bg-orange-50");
+            }
+
+            return (
+              <DraggableCell<TicketRow>
+                {...cellProps}
+                columnIndex={columnIndex}
+                rowKey={rowKeyGetter(cellProps.row)}
+                onDropValue={handleCellValueDrop}
+                canDrag={allowDrag}
+                canDrop={allowDrag}
+                renderValue={renderValue}
+                className={extraClasses.join(" ")}
+              />
+            );
+          },
+        };
+      })
       .filter(
         (column): column is Column<TicketRow> =>
           column !== null
@@ -843,13 +1352,48 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           ? data.indexes
           : updatedRows.map((_, idx) => idx);
       if (changedIndexes.length === 0) return;
+
+      const rowsToValidate: Array<{ id: string; normalized: string }> = [];
+
       setRows((prevRows) => {
         const updatedMap = new Map(prevRows.map((row) => [rowKeyGetter(row), row]));
 
         changedIndexes.forEach((idx) => {
           const updatedRow = updatedRows[idx];
-          if (updatedRow) {
-            updatedMap.set(rowKeyGetter(updatedRow), updatedRow);
+          if (!updatedRow) return;
+          const key = rowKeyGetter(updatedRow);
+          const normalized = normalizeAccountCode(updatedRow.AcctCode ?? "");
+
+          const existingRow = updatedMap.get(key);
+          if (existingRow) {
+            if (existingRow.AcctCode !== updatedRow.AcctCode) {
+              if (normalized.length > 0) {
+                rowsToValidate.push({ id: key, normalized });
+              }
+              updatedMap.set(key, {
+                ...existingRow,
+                ...updatedRow,
+                TaskDesc: "",
+                AcctDesc: "",
+                acctValidationStatus:
+                  normalized.length > 0 ? "unknown" : "valid",
+                acctValidationCode: normalized.length > 0 ? normalized : null,
+              });
+            } else {
+              updatedMap.set(key, { ...existingRow, ...updatedRow });
+            }
+          } else {
+            if (normalized.length > 0) {
+              rowsToValidate.push({ id: key, normalized });
+            }
+            updatedMap.set(key, {
+              ...updatedRow,
+              TaskDesc: "",
+              AcctDesc: "",
+              acctValidationStatus:
+                normalized.length > 0 ? "unknown" : "valid",
+              acctValidationCode: normalized.length > 0 ? normalized : null,
+            });
           }
         });
 
@@ -857,8 +1401,24 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           (row) => updatedMap.get(rowKeyGetter(row)) ?? row
         );
       });
+
+      if (rowsToValidate.length > 0) {
+        const overrides = new Map<string, string>();
+        const ids: string[] = [];
+        rowsToValidate.forEach(({ id, normalized }) => {
+          ids.push(id);
+          overrides.set(id, normalized);
+        });
+
+        window.setTimeout(() => {
+          void runValidationForRowIds(ids, {
+            codeOverrides: overrides,
+            showSpinner: true,
+          });
+        }, 0);
+      }
     },
-    [rowKeyGetter]
+    [rowKeyGetter, runValidationForRowIds]
   );
 
   const handleRetrieve = useCallback(async () => {
@@ -866,6 +1426,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     setLoadError(null);
     setSaveError(null);
     setSaveMessage(null);
+    setValidationError(null);
     try {
       const response = await fetch("/api/tickets", {
         method: "GET",
@@ -910,12 +1471,22 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       setCustomerFilter("");
       setOrderFilter("");
       setSaveMessage(null);
+
+      if (mapped.length > 0) {
+        if (typeof queueMicrotask === "function") {
+          queueMicrotask(() => {
+            requestBulkValidation();
+          });
+        } else {
+          requestBulkValidation();
+        }
+      }
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unexpected error");
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [requestBulkValidation]);
 
   const handleSave = useCallback(async () => {
     if (!hasSaveableRows) {
@@ -1046,6 +1617,21 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         </button>
         <button
           type="button"
+          onClick={handleValidateVisible}
+          disabled={isLoading || isSaving || isValidating || rows.length === 0}
+          className="px-4 py-2 rounded-md font-medium"
+          style={{
+            ...toolbarButtonBaseStyles,
+            cursor:
+              isLoading || isSaving || isValidating || rows.length === 0
+                ? "not-allowed"
+                : "pointer",
+          }}
+        >
+          {isValidating ? "Validating..." : "Validate Codes"}
+        </button>
+        <button
+          type="button"
           onClick={handleReset}
           disabled={isLoading}
           className="px-4 py-2 rounded-md font-medium"
@@ -1098,6 +1684,19 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
               }}
             >
               {saveStatus.message}
+            </div>
+          ) : validationError ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="text-sm font-medium px-3 py-2 rounded-md border bg-red-50 text-red-700 border-red-300"
+              style={{
+                minWidth: "200px",
+                textAlign: "center",
+                marginLeft: "auto",
+              }}
+            >
+              {validationError}
             </div>
           ) : null}
         </div>
