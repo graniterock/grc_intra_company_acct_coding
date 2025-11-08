@@ -93,7 +93,7 @@ function AccountCodeEditor({
   const key = column.key as keyof TicketRow;
   const value = row[key] as unknown as string | undefined;
 
-  const commit = (next: string, commitChanges = true) => {
+  const commit = (next: string, commitChanges = false) => {
     onRowChange(
       {
         ...row,
@@ -108,7 +108,7 @@ function AccountCodeEditor({
       autoFocus
       type="text"
       value={value ?? ""}
-      onChange={(event) => commit(event.target.value)}
+      onChange={(event) => commit(event.target.value, false)}
       onBlur={(event) => {
         const next = event.target.value;
         commit(next, true);
