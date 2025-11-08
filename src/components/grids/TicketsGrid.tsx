@@ -82,6 +82,7 @@ type TicketsGridProps = {
 
 type AccountCodeEditorProps = RenderEditCellProps<TicketRow> & {
   onCommitBlur: (rowId: string, value: string) => void;
+  onCommitStart: (rowId: string, value: string) => void;
 };
 
 function AccountCodeEditor({
@@ -89,6 +90,7 @@ function AccountCodeEditor({
   column,
   onRowChange,
   onCommitBlur,
+  onCommitStart,
 }: AccountCodeEditorProps) {
   const key = column.key as keyof TicketRow;
   const value = row[key] as unknown as string | undefined;
@@ -111,6 +113,7 @@ function AccountCodeEditor({
       onChange={(event) => commit(event.target.value, false)}
       onBlur={(event) => {
         const next = event.target.value;
+        onCommitStart(row.id, next);
         commit(next, true);
         onCommitBlur(row.id, next);
       }}
@@ -272,6 +275,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [isValidating, setIsValidating] = useState(false);
   const [bulkValidationSignal, setBulkValidationSignal] = useState(0);
   const initialRowsValidationTriggeredRef = useRef(false);
+  const pendingAcctCodeCommitRef = useRef<{ rowId: string; value: string } | null>(null);
   const lastBulkValidationScheduledRef = useRef(0);
 
   const collator = useMemo(
@@ -533,6 +537,10 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     []
   );
 
+  const handleAcctCodeCommitStart = useCallback((rowId: string, value: string) => {
+    pendingAcctCodeCommitRef.current = { rowId, value };
+  }, []);
+
   const baseColumns = useMemo<ReadonlyArray<Column<TicketRow>>>(() => {
     return [
       { key: "TicketNo", name: "Ticket #", width: 140, resizable: true },
@@ -556,7 +564,11 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         width: 160,
         editable: true,
         renderEditCell: (props: RenderEditCellProps<TicketRow>) => (
-          <AccountCodeEditor {...props} onCommitBlur={handleAcctCodeBlur} />
+          <AccountCodeEditor
+            {...props}
+            onCommitBlur={handleAcctCodeBlur}
+            onCommitStart={handleAcctCodeCommitStart}
+          />
         ),
       },
       {
@@ -588,7 +600,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         width: 140,
       },
     ];
-  }, [handleAcctCodeBlur]);
+  }, [handleAcctCodeBlur, handleAcctCodeCommitStart]);
   const columnKeys = useMemo(
     () => baseColumns.map((column) => column.key as TicketRowField),
     [baseColumns]
@@ -1354,53 +1366,85 @@ const columns = useMemo(() => {
       if (changedIndexes.length === 0) return;
 
       const rowsToValidate: Array<{ id: string; normalized: string }> = [];
+      const processedRowIds = new Set<string>();
+      const pendingCommit = pendingAcctCodeCommitRef.current;
 
       setRows((prevRows) => {
         const updatedMap = new Map(prevRows.map((row) => [rowKeyGetter(row), row]));
 
+        const applyRowUpdate = (row: TicketRow, explicitValue?: string) => {
+          const key = rowKeyGetter(row);
+          const existingRow = updatedMap.get(key);
+          if (!existingRow) {
+            return;
+          }
+
+          processedRowIds.add(key);
+
+          const nextValue =
+            explicitValue !== undefined ? explicitValue : (row.AcctCode ?? "");
+          const normalized = normalizeAccountCode(nextValue ?? "");
+
+          if (normalized.length === 0) {
+            updatedMap.set(key, {
+              ...existingRow,
+              ...row,
+              AcctCode: "",
+              TaskDesc: "",
+              AcctDesc: "",
+              acctValidationStatus: "valid",
+              acctValidationCode: null,
+            });
+            return;
+          }
+
+          if (existingRow.AcctCode !== normalized) {
+            rowsToValidate.push({ id: key, normalized });
+            updatedMap.set(key, {
+              ...existingRow,
+              ...row,
+              AcctCode: normalized,
+              TaskDesc: "",
+              AcctDesc: "",
+              acctValidationStatus: "unknown",
+              acctValidationCode: normalized,
+            });
+            return;
+          }
+
+          updatedMap.set(key, { ...existingRow, ...row });
+        };
+
         changedIndexes.forEach((idx) => {
           const updatedRow = updatedRows[idx];
           if (!updatedRow) return;
-          const key = rowKeyGetter(updatedRow);
-          const normalized = normalizeAccountCode(updatedRow.AcctCode ?? "");
-
-          const existingRow = updatedMap.get(key);
-          if (existingRow) {
-            if (existingRow.AcctCode !== updatedRow.AcctCode) {
-              if (normalized.length > 0) {
-                rowsToValidate.push({ id: key, normalized });
-              }
-              updatedMap.set(key, {
-                ...existingRow,
-                ...updatedRow,
-                TaskDesc: "",
-                AcctDesc: "",
-                acctValidationStatus:
-                  normalized.length > 0 ? "unknown" : "valid",
-                acctValidationCode: normalized.length > 0 ? normalized : null,
-              });
-            } else {
-              updatedMap.set(key, { ...existingRow, ...updatedRow });
-            }
-          } else {
-            if (normalized.length > 0) {
-              rowsToValidate.push({ id: key, normalized });
-            }
-            updatedMap.set(key, {
-              ...updatedRow,
-              TaskDesc: "",
-              AcctDesc: "",
-              acctValidationStatus:
-                normalized.length > 0 ? "unknown" : "valid",
-              acctValidationCode: normalized.length > 0 ? normalized : null,
-            });
-          }
+          const rowId = rowKeyGetter(updatedRow);
+          const explicitValue =
+            pendingCommit && pendingCommit.rowId === rowId
+              ? pendingCommit.value
+              : undefined;
+          applyRowUpdate(updatedRow, explicitValue);
         });
+
+        if (pendingCommit && !processedRowIds.has(pendingCommit.rowId)) {
+          const existingRow = updatedMap.get(pendingCommit.rowId);
+          if (existingRow) {
+            applyRowUpdate(
+              {
+                ...existingRow,
+                AcctCode: pendingCommit.value,
+              },
+              pendingCommit.value
+            );
+          }
+        }
 
         return prevRows.map(
           (row) => updatedMap.get(rowKeyGetter(row)) ?? row
         );
       });
+
+      pendingAcctCodeCommitRef.current = null;
 
       if (rowsToValidate.length > 0) {
         const overrides = new Map<string, string>();
