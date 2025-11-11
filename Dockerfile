@@ -1,5 +1,6 @@
 # ---- build stage ----
-FROM node:20-bookworm-slim AS build
+#FROM node:20-bookworm-slim AS build
+FROM node:18-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 # Accept build-time arg and export it as an environment variable
