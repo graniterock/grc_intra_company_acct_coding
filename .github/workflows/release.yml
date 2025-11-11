@@ -31,5 +31,8 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
+            ${{ env.IMAGE_NAME }}
             ghcr.io/graniterock/grc_intra_company_acct_coding:latest
             ghcr.io/graniterock/grc_intra_company_acct_coding:${{ github.sha }}
+          build-args: |
+             SQL_SERVER_HOST=${{ secrets.SQL_SERVER_HOST }}
