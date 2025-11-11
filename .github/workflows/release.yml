@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      SQL_SERVER_HOST: ${{ secrets.SQL_SERVER_HOST }}
     permissions:
       contents: read
       packages: write
