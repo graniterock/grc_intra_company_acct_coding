@@ -2,7 +2,10 @@ name: Build and Publish Image (GHCR)
 
 on:
   push:
-    branches: [ master ]   # your default branch
+    branches:
+      - master
+      - dev-new-ts-changes
+ 
 
 jobs:
   build:
