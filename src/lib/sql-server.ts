@@ -133,6 +133,7 @@ const TICKETS_QUERY = `
         UnitPrice,
         ExportStatus
     FROM Tkbatch
+   WHERE VoidStatus <> 'V'
     UNION ALL
     SELECT
         TicketNo,
@@ -150,6 +151,7 @@ const TICKETS_QUERY = `
         ExportStatus
     FROM Tkhist1
     WHERE ExportStatus = 'X'
+      AND VoidStatus <> 'V'
 ),
 other_src AS (
     SELECT
@@ -162,6 +164,7 @@ other_src AS (
         Qty,
         UnitPrice
     FROM Tkeother
+   WHERE VoidStatus <> 'V'
     UNION ALL
     SELECT
         TicketNo,
@@ -173,6 +176,7 @@ other_src AS (
         Qty,
         UnitPrice
     FROM Tkohist
+   WHERE VoidStatus <> 'V'
 ),
 base AS (
     SELECT
@@ -500,10 +504,7 @@ const resolveWindowsUser = (): string => {
   }
 
   return (
-    process.env.USERNAME ||
-    process.env.USER ||
-    process.env.LOGNAME ||
-    "unknown"
+    process.env.USERNAME || process.env.USER || process.env.LOGNAME || "unknown"
   );
 };
 
