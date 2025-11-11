@@ -1,6 +1,5 @@
 # ---- build stage ----
-#FROM node:20-bookworm-slim AS build
-FROM node:18-alpine AS builder
+FROM node:20-bookworm-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG SQL_SERVER_HOST
