@@ -24,6 +24,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./Dockerfile 
           push: true
           tags: |
             ghcr.io/graniterock/grc_intra_company_acct_coding:latest
