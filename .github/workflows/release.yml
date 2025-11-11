@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SQL_SERVER_HOST: ${{ secrets.SQL_SERVER_HOST }}
+      SQL_SERVER_DATABASE: ${{ secrets.SQL_SERVER_DATABASE }}
     permissions:
       contents: read
       packages: write
