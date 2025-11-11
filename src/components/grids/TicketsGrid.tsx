@@ -1315,7 +1315,7 @@ const columns = useMemo(() => {
               />
             );
           },
-        };
+        } as Column<TicketRow, unknown>;
       })
       .filter(
         (column): column is Column<TicketRow, unknown> =>
