@@ -80,6 +80,19 @@ type TicketsGridProps = {
   height?: number | string;
 };
 
+type GridColumn = Column<TicketRow, unknown>;
+
+function isGridColumn(column: unknown): column is GridColumn {
+  if (!column || typeof column !== "object") return false;
+  const candidate = column as Partial<GridColumn>;
+  return (
+    typeof candidate.renderCell === "function" &&
+    typeof candidate.renderHeaderCell === "function" &&
+    typeof candidate.name !== "undefined" &&
+    typeof candidate.sortable === "boolean"
+  );
+}
+
 type AccountCodeEditorProps = RenderEditCellProps<TicketRow> & {
   onCommitBlur: (rowId: string, value: string) => void;
   onCommitStart: (rowId: string, value: string) => void;
@@ -1254,7 +1267,7 @@ const columns = useMemo(() => {
 
         return {
           ...column,
-          sortable: false,
+          sortable: Boolean(column.sortable),
           renderHeaderCell: () => (
             <HeaderFilter
               label={String(column.name)}
@@ -1317,10 +1330,7 @@ const columns = useMemo(() => {
           },
         } as Column<TicketRow, unknown>;
       })
-      .filter(
-        (column): column is Column<TicketRow, unknown> =>
-          column !== null
-      );
+      .filter(isGridColumn);
   }, [
     baseColumnMap,
     columnOptions,
