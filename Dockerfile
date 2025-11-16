@@ -2,6 +2,8 @@
 FROM node:20-bookworm-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG SQL_SERVER_HOST
+ENV SQL_SERVER_HOST=${SQL_SERVER_HOST}
 # Optional: faster, smaller installs without dev’s cache
 RUN corepack enable
 COPY package*.json ./

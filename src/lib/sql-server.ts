@@ -8,52 +8,65 @@ const required = (value: string | undefined, name: string): string => {
   return value;
 };
 
-const sqlConfig: SqlConfig = {
-  server: required(process.env.SQL_SERVER_HOST, "SQL_SERVER_HOST"),
-  database: required(process.env.SQL_SERVER_DATABASE, "SQL_SERVER_DATABASE"),
-  user: required(process.env.SQL_SERVER_USER, "SQL_SERVER_USER"),
-  password: required(process.env.SQL_SERVER_PASSWORD, "SQL_SERVER_PASSWORD"),
-  options: {
-    encrypt: false,
-    trustServerCertificate: true,
-  },
+const buildSqlConfig = (): SqlConfig => {
+  const config: SqlConfig = {
+    server: required(process.env.SQL_SERVER_HOST, "SQL_SERVER_HOST"),
+    database: required(process.env.SQL_SERVER_DATABASE, "SQL_SERVER_DATABASE"),
+    user: required(process.env.SQL_SERVER_USER, "SQL_SERVER_USER"),
+    password: required(process.env.SQL_SERVER_PASSWORD, "SQL_SERVER_PASSWORD"),
+    options: {
+      encrypt: false,
+      trustServerCertificate: true,
+    },
+  };
+
+  const portRaw = process.env.SQL_SERVER_PORT;
+  if (portRaw) {
+    config.port = Number.parseInt(portRaw, 10);
+    if (Number.isNaN(config.port)) {
+      throw new Error("SQL_SERVER_PORT must be a valid integer");
+    }
+  }
+
+  const connectionTimeoutRaw = process.env.SQL_SERVER_CONNECTION_TIMEOUT;
+  if (connectionTimeoutRaw) {
+    config.connectionTimeout = Number.parseInt(connectionTimeoutRaw, 10);
+    if (Number.isNaN(config.connectionTimeout)) {
+      throw new Error(
+        "SQL_SERVER_CONNECTION_TIMEOUT must be a valid integer (milliseconds)"
+      );
+    }
+  }
+
+  const requestTimeoutRaw = process.env.SQL_SERVER_REQUEST_TIMEOUT;
+  if (requestTimeoutRaw) {
+    config.requestTimeout = Number.parseInt(requestTimeoutRaw, 10);
+    if (Number.isNaN(config.requestTimeout)) {
+      throw new Error(
+        "SQL_SERVER_REQUEST_TIMEOUT must be a valid integer (milliseconds)"
+      );
+    }
+  }
+
+  const instanceName = process.env.SQL_SERVER_INSTANCE;
+  if (instanceName) {
+    config.options = {
+      ...config.options,
+      instanceName,
+    };
+  }
+
+  return config;
 };
 
-const portRaw = process.env.SQL_SERVER_PORT;
-if (portRaw) {
-  sqlConfig.port = Number.parseInt(portRaw, 10);
-  if (Number.isNaN(sqlConfig.port)) {
-    throw new Error("SQL_SERVER_PORT must be a valid integer");
-  }
-}
+let cachedSqlConfig: SqlConfig | null = null;
 
-const connectionTimeoutRaw = process.env.SQL_SERVER_CONNECTION_TIMEOUT;
-if (connectionTimeoutRaw) {
-  sqlConfig.connectionTimeout = Number.parseInt(connectionTimeoutRaw, 10);
-  if (Number.isNaN(sqlConfig.connectionTimeout)) {
-    throw new Error(
-      "SQL_SERVER_CONNECTION_TIMEOUT must be a valid integer (milliseconds)"
-    );
+const getSqlConfig = (): SqlConfig => {
+  if (!cachedSqlConfig) {
+    cachedSqlConfig = buildSqlConfig();
   }
-}
-
-const requestTimeoutRaw = process.env.SQL_SERVER_REQUEST_TIMEOUT;
-if (requestTimeoutRaw) {
-  sqlConfig.requestTimeout = Number.parseInt(requestTimeoutRaw, 10);
-  if (Number.isNaN(sqlConfig.requestTimeout)) {
-    throw new Error(
-      "SQL_SERVER_REQUEST_TIMEOUT must be a valid integer (milliseconds)"
-    );
-  }
-}
-
-const instanceName = process.env.SQL_SERVER_INSTANCE;
-if (instanceName) {
-  sqlConfig.options = {
-    ...sqlConfig.options,
-    instanceName,
-  };
-}
+  return cachedSqlConfig;
+};
 
 let pool: ConnectionPool | null = null;
 
@@ -390,7 +403,7 @@ async function getPool(): Promise<ConnectionPool> {
     return pool;
   }
 
-  pool = await new sql.ConnectionPool(sqlConfig).connect();
+  pool = await new sql.ConnectionPool(getSqlConfig()).connect();
   pool.on("error", () => {
     pool = null;
   });

@@ -5,11 +5,13 @@ on:
     branches:
       - master
       - dev-new-ts-changes
- 
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      SQL_SERVER_HOST: ${{ secrets.SQL_SERVER_HOST }}
+      SQL_SERVER_DATABASE: ${{ secrets.SQL_SERVER_DATABASE }}
     permissions:
       contents: read
       packages: write
@@ -27,8 +29,11 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile 
+          file: ./Dockerfile
           push: true
           tags: |
+            ${{ env.IMAGE_NAME }}
             ghcr.io/graniterock/grc_intra_company_acct_coding:latest
             ghcr.io/graniterock/grc_intra_company_acct_coding:${{ github.sha }}
+          build-args: |
+             SQL_SERVER_HOST=${{ secrets.SQL_SERVER_HOST }}
