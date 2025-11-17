@@ -150,7 +150,7 @@ const TICKETS_QUERY = `
         UnitPrice,
         ExportStatus
     FROM Tkhist1
-    WHERE ExportStatus = 'X'
+    WHERE ExportStatus <> 'E'
       AND VoidStatus <> 'V'
 ),
 other_src AS (
