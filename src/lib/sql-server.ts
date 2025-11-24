@@ -133,8 +133,10 @@ const TICKETS_QUERY = `
         UnitPrice,
         ExportStatus
     FROM Tkbatch
-   WHERE VoidStatus <> 'V'
+    WHERE VoidStatus <> 'V'
+    
     UNION ALL
+    
     SELECT
         TicketNo,
         UniqueID,
@@ -164,8 +166,10 @@ other_src AS (
         Qty,
         UnitPrice
     FROM Tkeother
-   WHERE VoidStatus <> 'V'
+    WHERE VoidStatus <> 'V'
+    
     UNION ALL
+    
     SELECT
         TicketNo,
         UniqueID,
@@ -176,8 +180,49 @@ other_src AS (
         Qty,
         UnitPrice
     FROM Tkohist
-   WHERE VoidStatus <> 'V'
+    WHERE VoidStatus <> 'V'
 ),
+
+-- NEW: freight rows from Tkbatch and Tkhist1
+freight_src AS (
+    SELECT
+        TicketNo,
+        UniqueID,
+        CAST(0 AS int) AS ItemNo,             -- placeholder; real ItemNo assigned later
+        'AA' AS ProductID,
+        'Freight' AS Description,
+        CASE FreightUnitId
+            WHEN 'T' THEN 'Ton'
+            ELSE 'Per Load'
+        END AS Unit,
+        FreightQty     AS Qty,
+        FreightRate    AS UnitPrice,
+        FreightAmount
+    FROM Tkbatch
+    WHERE VoidStatus <> 'V'
+      AND FreightAmount > 0
+
+    UNION ALL
+
+    SELECT
+        TicketNo,
+        UniqueID,
+        CAST(0 AS int) AS ItemNo,
+        'AA' AS ProductID,
+        'Freight' AS Description,
+        CASE FreightUnitId
+            WHEN 'T' THEN 'Ton'
+            ELSE 'Per Load'
+        END AS Unit,
+        FreightQty     AS Qty,
+        FreightRate    AS UnitPrice,
+        FreightAmount
+    FROM Tkhist1
+    WHERE ExportStatus <> 'E'
+      AND VoidStatus <> 'V'
+      AND FreightAmount > 0
+),
+
 base AS (
     SELECT
         b.TicketNo,
@@ -206,7 +251,10 @@ base_max AS (
     FROM base
     GROUP BY TicketNo, UniqueID
 ),
+
+-- UPDATED: extras (other charges + freight)
 e_raw AS (
+    -- existing other charges
     SELECT
         e.TicketNo,
         b.UniqueID,
@@ -222,11 +270,41 @@ e_raw AS (
         e.Qty,
         e.UnitPrice,
         o.Description1 AS JobName,
-        1 AS SourceRank
+        1 AS SourceRank,
+        CAST(0 AS bit) AS IsFreight
     FROM other_src AS e
     INNER JOIN base_src AS b
         ON e.TicketNo = b.TicketNo
        AND e.UniqueID = b.UniqueID
+    INNER JOIN Slordnam AS o ON b.OrderID    = o.OrderID
+    INNER JOIN Slcust   AS c ON b.CustomerID = c.CustomerID
+    WHERE b.ExportStatus <> 'E'
+      AND c.ArType = 'C'
+
+    UNION ALL
+
+    -- NEW: freight rows as "other" lines
+    SELECT
+        f.TicketNo,
+        b.UniqueID,
+        f.ItemNo,
+        b.LocationID,
+        o.Description2 AS JobNumber,
+        b.CustomerID,
+        b.OrderID,
+        f.ProductID,
+        f.Description,
+        b.TicketDate,
+        f.Unit,
+        f.Qty,
+        f.UnitPrice,
+        o.Description1 AS JobName,
+        1 AS SourceRank,
+        CAST(1 AS bit) AS IsFreight
+    FROM freight_src AS f
+    INNER JOIN base_src AS b
+        ON f.TicketNo = b.TicketNo
+       AND f.UniqueID = b.UniqueID
     INNER JOIN Slordnam AS o ON b.OrderID    = o.OrderID
     INNER JOIN Slcust   AS c ON b.CustomerID = c.CustomerID
     WHERE b.ExportStatus <> 'E'
@@ -256,9 +334,14 @@ e_seq AS (
         d.UnitPrice,
         d.JobName,
         d.SourceRank,
+        d.IsFreight,
         ROW_NUMBER() OVER (
             PARTITION BY d.TicketNo, d.UniqueID
-            ORDER BY d.ProductID, d.ItemNo, d.Description
+            ORDER BY 
+                d.IsFreight DESC,      -- freight first for each ticket
+                d.ProductID,
+                d.ItemNo,
+                d.Description
         ) AS OtherRowNum
     FROM e_dedup AS d
     WHERE d.rn = 1
