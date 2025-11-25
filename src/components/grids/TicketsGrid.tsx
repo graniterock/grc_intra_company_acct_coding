@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { DataGrid, type Column, type SortColumn } from "react-data-grid";
 import type {
   FillEvent,
@@ -1318,7 +1318,13 @@ const columns = useMemo(() => {
         };
       })
       .filter(
-        (column): column is Column<TicketRow, unknown> =>
+        (
+          column
+        ): column is Column<TicketRow, unknown> & {
+          sortable: boolean;
+          renderHeaderCell: () => ReactElement;
+          renderCell: (cellProps: RenderCellProps<TicketRow>) => ReactElement;
+        } =>
           column !== null
       );
   }, [
