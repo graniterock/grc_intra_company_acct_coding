@@ -272,7 +272,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [isValidating, setIsValidating] = useState(false);
+  const [, setIsValidating] = useState(false);
   const [bulkValidationSignal, setBulkValidationSignal] = useState(0);
   const initialRowsValidationTriggeredRef = useRef(false);
   const pendingAcctCodeCommitRef = useRef<{ rowId: string; value: string } | null>(null);
@@ -918,13 +918,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [sortedRows, rowKeyGetter]
   );
 
-  const validateRow = useCallback(
-    async (row: TicketRow) => {
-      await runValidationForRowIds([row.id], { showSpinner: true });
-    },
-    [runValidationForRowIds]
-  );
-
   const validateAllVisibleRows = useCallback(async () => {
     if (visibleRowKeys.length === 0) {
       return;
@@ -971,30 +964,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     setCustomerFilter("");
     setOrderFilter("");
   }, []);
-
-  const handleValidateVisible = useCallback(() => {
-    if (visibleRowKeys.length === 0) {
-      return;
-    }
-
-    if (visibleRowKeys.length === 1) {
-      const targetRow = sortedRows.find(
-        (row) => rowKeyGetter(row) === visibleRowKeys[0]
-      );
-      if (targetRow) {
-        void validateRow(targetRow);
-        return;
-      }
-    }
-
-    void validateAllVisibleRows();
-  }, [
-    visibleRowKeys,
-    sortedRows,
-    rowKeyGetter,
-    validateRow,
-    validateAllVisibleRows,
-  ]);
 
   const requestBulkValidation = useCallback(() => {
     setBulkValidationSignal((prev) => prev + 1);
@@ -1664,21 +1633,6 @@ const columns = useMemo(() => {
           }}
         >
           {isSaving ? "Saving..." : "Save Tickets"}
-        </button>
-        <button
-          type="button"
-          onClick={handleValidateVisible}
-          disabled={isLoading || isSaving || isValidating || rows.length === 0}
-          className="px-4 py-2 rounded-md font-medium"
-          style={{
-            ...toolbarButtonBaseStyles,
-            cursor:
-              isLoading || isSaving || isValidating || rows.length === 0
-                ? "not-allowed"
-                : "pointer",
-          }}
-        >
-          {isValidating ? "Validating..." : "Validate Codes"}
         </button>
         <button
           type="button"
