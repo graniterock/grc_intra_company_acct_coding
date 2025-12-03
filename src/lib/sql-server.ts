@@ -444,7 +444,7 @@ annotated AS (
        AND w.LocationID = fr.LocationID
        AND w.OrderID = fr.OrderID
        AND CONVERT(date, w.Ticket_DateTime) = CONVERT(date, fr.TicketDate)
-    LEFT JOIN dbo.GRC_Intra_Ticket_AccountCode_TEST AS t
+    LEFT JOIN dbo.GRC_Intra_Ticket_AccountCode AS t
         ON t.TicketNo = fr.TicketNo
        AND t.TicketUniqueID = fr.UniqueID
        AND t.TicketItemNo = fr.ItemNo
