@@ -20,6 +20,7 @@ type TicketRow = {
   id: string;
   UniqueID: string;
   ItemNo: string;
+  VehicleID: string;
   TicketNo: string;
   LocationID: string;
   JobNumber: string;
@@ -59,6 +60,7 @@ type TicketApiRow = {
   TicketNo: string | number | null;
   UniqueID: string | number | null;
   ItemNo: string | number | null;
+  VehicleID: string | number | null;
   LocationID: string | number | null;
   JobNumber: string | null;
   CustomerID: string | number | null;
@@ -247,6 +249,7 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
     id: rowId,
     UniqueID: uniqueId,
     ItemNo: itemNo,
+    VehicleID: asString(record.VehicleID),
     TicketNo: ticketNo,
     LocationID: asString(record.LocationID),
     JobNumber: asString(record.JobNumber),
@@ -596,6 +599,12 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         width: 220,
         editable: false,
       },
+      {
+        key: "VehicleID",
+        name: "Vehicle ID",
+        width: 140,
+        editable: false,
+      },
       { key: "Unit", name: "Unit", width: 90 },
       {
         key: "Qty",
@@ -624,6 +633,49 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [columnKeys]
   );
 
+  const insertMissingColumnAtDefaultPosition = useCallback(
+    (current: TicketRowField[], key: TicketRowField): TicketRowField[] => {
+      if (current.includes(key)) {
+        return current;
+      }
+      const merged = [...current];
+      const defaultIndex = columnKeys.indexOf(key);
+      if (defaultIndex <= 0) {
+        merged.unshift(key);
+        return merged;
+      }
+      for (let idx = defaultIndex - 1; idx >= 0; idx -= 1) {
+        const neighbor = columnKeys[idx];
+        const neighborIndex = merged.indexOf(neighbor);
+        if (neighborIndex !== -1) {
+          merged.splice(neighborIndex + 1, 0, key);
+          return merged;
+        }
+      }
+      merged.unshift(key);
+      return merged;
+    },
+    [columnKeys]
+  );
+
+  const placeColumnAfter = useCallback(
+    (
+      current: TicketRowField[],
+      column: TicketRowField,
+      anchor: TicketRowField
+    ): TicketRowField[] => {
+      const without = current.filter((key) => key !== column);
+      const anchorIndex = without.indexOf(anchor);
+      if (anchorIndex === -1) {
+        return [...without, column];
+      }
+      const next = [...without];
+      next.splice(anchorIndex + 1, 0, column);
+      return next;
+    },
+    []
+  );
+
   const [columnOrder, setColumnOrder] = useState<TicketRowField[]>(() => [
     ...columnKeys,
   ]);
@@ -645,11 +697,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         }
       }
       if (valid.length === 0) return;
-      const merged = [...valid];
+      let merged = [...valid];
       columnKeys.forEach((key) => {
-        if (!merged.includes(key)) {
-          merged.push(key);
-        }
+        merged = insertMissingColumnAtDefaultPosition(merged, key);
       });
       setColumnOrder((prev) => {
         if (
@@ -658,12 +708,16 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         ) {
           return prev;
         }
-        return merged;
+        return placeColumnAfter(
+          merged,
+          "VehicleID",
+          "AcctDesc"
+        );
       });
     } catch {
       // ignore malformed storage
     }
-  }, [columnKeySet, columnKeys]);
+  }, [columnKeySet, columnKeys, insertMissingColumnAtDefaultPosition, placeColumnAfter]);
 
   useEffect(() => {
     setColumnOrder((prev) => {
@@ -672,9 +726,13 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       if (missing.length === 0 && sanitized.length === prev.length) {
         return prev;
       }
-      return [...sanitized, ...missing];
+      const withMissing = missing.reduce(
+        (acc, key) => insertMissingColumnAtDefaultPosition(acc, key),
+        sanitized
+      );
+      return placeColumnAfter(withMissing, "VehicleID", "AcctDesc");
     });
-  }, [columnKeySet, columnKeys]);
+  }, [columnKeySet, columnKeys, insertMissingColumnAtDefaultPosition, placeColumnAfter]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
