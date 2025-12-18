@@ -135,6 +135,7 @@ const TICKETS_QUERY = `
         TicketNo,
         UniqueID,
         CAST(ItemNo AS int) AS ItemNo,
+        VehicleID,
         LocationID,
         CustomerID,
         OrderID,
@@ -154,6 +155,7 @@ const TICKETS_QUERY = `
         TicketNo,
         UniqueID,
         CAST(ItemNo AS int) AS ItemNo,
+        VehicleID,
         LocationID,
         CustomerID,
         OrderID,
@@ -173,6 +175,7 @@ other_src AS (
         TicketNo,
         UniqueID,
         CAST(ItemNo AS int) AS ItemNo,
+        VehicleID,
         OtherChargeID AS ProductID,
         Description,
         Unit,
@@ -187,6 +190,7 @@ other_src AS (
         TicketNo,
         UniqueID,
         CAST(ItemNo AS int) AS ItemNo,
+        VehicleID,
         OtherChargeID AS ProductID,
         Description,
         Unit,
@@ -196,12 +200,13 @@ other_src AS (
     WHERE VoidStatus <> 'V'
 ),
 
--- NEW: freight rows from Tkbatch and Tkhist1
+-- freight rows from Tkbatch and Tkhist1
 freight_src AS (
     SELECT
         TicketNo,
         UniqueID,
         CAST(0 AS int) AS ItemNo,             -- placeholder; real ItemNo assigned later
+        VehicleID,
         'AA' AS ProductID,
         'Freight' AS Description,
         CASE FreightUnitId
@@ -221,6 +226,7 @@ freight_src AS (
         TicketNo,
         UniqueID,
         CAST(0 AS int) AS ItemNo,
+        VehicleID,
         'AA' AS ProductID,
         'Freight' AS Description,
         CASE FreightUnitId
@@ -241,6 +247,7 @@ base AS (
         b.TicketNo,
         b.UniqueID,
         b.ItemNo,
+        b.VehicleID,
         b.LocationID,
         o.Description2 AS JobNumber,
         b.CustomerID,
@@ -265,13 +272,14 @@ base_max AS (
     GROUP BY TicketNo, UniqueID
 ),
 
--- UPDATED: extras (other charges + freight)
+-- extras (other charges + freight)
 e_raw AS (
     -- existing other charges
     SELECT
         e.TicketNo,
         b.UniqueID,
         e.ItemNo,
+        e.VehicleID,
         b.LocationID,
         o.Description2 AS JobNumber,
         b.CustomerID,
@@ -296,11 +304,12 @@ e_raw AS (
 
     UNION ALL
 
-    -- NEW: freight rows as "other" lines
+    -- freight rows as "other" lines
     SELECT
         f.TicketNo,
         b.UniqueID,
         f.ItemNo,
+        f.VehicleID,
         b.LocationID,
         o.Description2 AS JobNumber,
         b.CustomerID,
@@ -326,7 +335,7 @@ e_raw AS (
 e_dedup AS (
     SELECT *
          , ROW_NUMBER() OVER (
-               PARTITION BY TicketNo, UniqueID, ProductID
+               PARTITION BY TicketNo, UniqueID, VehicleID, ProductID
                ORDER BY ItemNo
            ) AS rn
     FROM e_raw
@@ -335,6 +344,7 @@ e_seq AS (
     SELECT
         d.TicketNo,
         d.UniqueID,
+        d.VehicleID,
         d.LocationID,
         d.JobNumber,
         d.CustomerID,
@@ -364,6 +374,7 @@ final_rows AS (
         b.TicketNo,
         b.UniqueID,
         b.ItemNo,
+        b.VehicleID,
         b.LocationID,
         b.JobNumber,
         b.CustomerID,
@@ -384,6 +395,7 @@ final_rows AS (
         e.TicketNo,
         e.UniqueID,
         (ISNULL(m.MaxBaseItemNo, 0) + e.OtherRowNum) AS ItemNo,
+        e.VehicleID,
         e.LocationID,
         e.JobNumber,
         e.CustomerID,
@@ -406,6 +418,7 @@ annotated AS (
         fr.TicketNo,
         fr.UniqueID,
         fr.ItemNo,
+        fr.VehicleID,
         fr.LocationID,
         fr.JobNumber,
         fr.CustomerID,
@@ -457,6 +470,7 @@ SELECT
     TicketNo,
     UniqueID,
     ItemNo,
+    VehicleID,
     LocationID,
     JobNumber,
     CustomerID,
@@ -497,6 +511,7 @@ export type TicketRecord = {
   TicketNo: string;
   UniqueID: string | number | null;
   ItemNo: string | number | null;
+  VehicleID: string | number | null;
   LocationID: string | number | null;
   JobNumber: string | null;
   CustomerID: string | number | null;
