@@ -238,11 +238,11 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
   const ticketNo = asString(record.TicketNo);
   const uniqueId = asString(record.UniqueID);
   const itemNo = asString(record.ItemNo);
+  // Build a stable, unique row key that includes the ticket number to avoid reuse after filtering.
+  const rowIdParts = [ticketNo, uniqueId, itemNo].filter((part) => part !== "");
   const rowId =
-    uniqueId !== ""
-      ? itemNo !== ""
-        ? `${uniqueId}-${itemNo}`
-        : uniqueId
+    rowIdParts.length > 0
+      ? rowIdParts.join("-")
       : `${ticketNo || "ticket"}-${index}`;
 
   return {
@@ -277,6 +277,7 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
 
 export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [rows, setRows] = useState<TicketRow[]>([]);
+  const [rowsVersion, setRowsVersion] = useState(0);
   const [filters, setFilters] = useState<Partial<Record<TicketRowField, string>>>({});
   const [jobFilter, setJobFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
@@ -907,8 +908,6 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     return optionsMap;
   }, [rows, columnKeys, filters, dateColumns, collator, matchesTopLevelFilters]);
 
-  const rowKeyGetter = useCallback((row: TicketRow) => row.id, []);
-
   const filteredRows = useMemo(() => {
     const rowsWithTopLevelFilters =
       jobFilter || customerFilter || orderFilter ? rows.filter(matchesTopLevelFilters) : rows;
@@ -983,6 +982,10 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       return 0;
     });
   }, [filteredRows, sortColumns, collator]);
+
+  const gridInstanceKey = useMemo(() => `rows-${rowsVersion}`, [rowsVersion]);
+
+  const rowKeyGetter = useCallback((row: TicketRow) => row.id, []);
 
   const visibleRowKeys = useMemo(
     () => sortedRows.map((row) => rowKeyGetter(row)),
@@ -1547,6 +1550,7 @@ const columns = useMemo(() => {
 
       const mapped = data.rows.map((record, index) => toTicketRow(record, index));
       setRows(mapped);
+      setRowsVersion((prev) => prev + 1);
       setFilters({});
       setJobFilter("");
       setCustomerFilter("");
@@ -1881,6 +1885,7 @@ const columns = useMemo(() => {
       </div>
       <div className="flex-1 min-h-0 w-full">
         <DataGrid<TicketRow>
+          key={gridInstanceKey}
           columns={columns}
           rows={sortedRows}
           onRowsChange={handleRowsChange}
