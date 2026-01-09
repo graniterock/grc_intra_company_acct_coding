@@ -82,6 +82,11 @@ type TicketsGridProps = {
   height?: number | string;
 };
 
+type DateRange = {
+  from: string;
+  to: string;
+};
+
 type GridColumn = Column<TicketRow, unknown>;
 
 function isGridColumn(column: unknown): column is GridColumn {
@@ -182,6 +187,19 @@ const formatDateDisplay = (value: Date | null): string => {
   return `${month}/${day}/${year}`;
 };
 
+const normalizeToDayKey = (value: string | Date | null | undefined): string => {
+  if (value === null || value === undefined || value === "") return "";
+  const parsed = parseDateValue(value);
+  if (!parsed) return "";
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getTicketDateKey = (row: TicketRow): string =>
+  normalizeToDayKey(row.TicketDateTime ?? row.TicketDate);
+
 const currencyFormatter = new Intl.NumberFormat(undefined, {
   style: "currency",
   currency: "USD",
@@ -279,6 +297,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [rows, setRows] = useState<TicketRow[]>([]);
   const [rowsVersion, setRowsVersion] = useState(0);
   const [filters, setFilters] = useState<Partial<Record<TicketRowField, string>>>({});
+  const [ticketDateRange, setTicketDateRange] = useState<DateRange>({ from: "", to: "" });
   const [jobFilter, setJobFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
   const [orderFilter, setOrderFilter] = useState("");
@@ -829,12 +848,28 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [jobFilter, customerFilter, orderFilter]
   );
 
+  const matchesTicketDateRange = useCallback(
+    (row: TicketRow) => {
+      const from = ticketDateRange.from;
+      const to = ticketDateRange.to;
+      if (!from && !to) return true;
+      const dateKey = getTicketDateKey(row);
+      if (!dateKey) return false;
+      if (from && !to) return dateKey === from;
+      if (!from && to) return dateKey <= to;
+      return dateKey >= from && dateKey <= to;
+    },
+    [ticketDateRange.from, ticketDateRange.to]
+  );
+
   const columnOptions = useMemo(() => {
     const filterEntries = (Object.entries(filters) as Array<[TicketRowField, string]>).filter(
       ([, value]) => Boolean(value)
     );
 
-    const baseRows = rows.filter(matchesTopLevelFilters);
+    const baseRows = rows.filter(
+      (row) => matchesTopLevelFilters(row) && matchesTicketDateRange(row)
+    );
 
     const matchesFilter = (
       row: TicketRow,
@@ -906,11 +941,20 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     });
 
     return optionsMap;
-  }, [rows, columnKeys, filters, dateColumns, collator, matchesTopLevelFilters]);
+  }, [
+    rows,
+    columnKeys,
+    filters,
+    dateColumns,
+    collator,
+    matchesTopLevelFilters,
+    matchesTicketDateRange,
+  ]);
 
   const filteredRows = useMemo(() => {
-    const rowsWithTopLevelFilters =
-      jobFilter || customerFilter || orderFilter ? rows.filter(matchesTopLevelFilters) : rows;
+    const rowsWithTopLevelFilters = rows.filter(
+      (row) => matchesTopLevelFilters(row) && matchesTicketDateRange(row)
+    );
 
     if (Object.keys(filters).length === 0) return rowsWithTopLevelFilters;
     return rowsWithTopLevelFilters.filter((row) =>
@@ -943,6 +987,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     filters,
     dateColumns,
     matchesTopLevelFilters,
+    matchesTicketDateRange,
     jobFilter,
     customerFilter,
     orderFilter,
@@ -1027,6 +1072,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
 
   const handleReset = useCallback(() => {
     setFilters({});
+    setTicketDateRange({ from: "", to: "" });
     setSortColumns([]);
     setSaveError(null);
     setSaveMessage(null);
@@ -1104,7 +1150,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     (customerFilter.trim() ? 1 : 0) +
     (orderFilter.trim() ? 1 : 0);
   const hasTopFiltersApplied = topLevelFilterCount > 0;
-  const activeFilterCount = Object.keys(filters).length + topLevelFilterCount;
+  const hasTicketDateRange = Boolean(ticketDateRange.from || ticketDateRange.to);
+  const activeFilterCount =
+    Object.keys(filters).length + topLevelFilterCount + (hasTicketDateRange ? 1 : 0);
   const filteredRowCount = activeFilterCount > 0 ? filteredRows.length : 0;
   const hasSaveableRows = useMemo(
     () =>
@@ -1288,7 +1336,10 @@ const columns = useMemo(() => {
         const column = baseColumnMap.get(columnKey);
         if (!column) return null;
 
-        const inputType: FilterInputType = dateColumns.has(columnKey)
+        const isTicketDateColumn = columnKey === "TicketDate";
+        const inputType: FilterInputType = isTicketDateColumn
+          ? "date-range"
+          : dateColumns.has(columnKey)
           ? "date"
           : numericColumns.has(columnKey)
           ? "number"
@@ -1303,6 +1354,8 @@ const columns = useMemo(() => {
               label={String(column.name)}
               value={filters[columnKey] ?? ""}
               type={inputType}
+              rangeValue={isTicketDateColumn ? ticketDateRange : undefined}
+              onRangeChange={isTicketDateColumn ? setTicketDateRange : undefined}
               options={columnOptions.get(columnKey)}
               onChange={(value) => handleFilterChange(columnKey, value)}
               onLabelClick={(event) => toggleSortColumn(columnKey, event.shiftKey)}
@@ -1369,6 +1422,7 @@ const columns = useMemo(() => {
     handleCellValueDrop,
     handleFilterChange,
     numericColumns,
+    ticketDateRange,
     columnOrder,
     rowKeyGetter,
     sortColumns,
@@ -1552,6 +1606,7 @@ const columns = useMemo(() => {
       setRows(mapped);
       setRowsVersion((prev) => prev + 1);
       setFilters({});
+      setTicketDateRange({ from: "", to: "" });
       setJobFilter("");
       setCustomerFilter("");
       setOrderFilter("");
@@ -1903,7 +1958,7 @@ const columns = useMemo(() => {
               [columnKey]: event.sourceRow[columnKey],
             };
           }}
-          headerRowHeight={64}
+          headerRowHeight={80}
           style={gridStyle}
         />
       </div>
