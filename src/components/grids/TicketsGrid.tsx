@@ -10,6 +10,7 @@ import type {
   RowsChangeData,
 } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
+import { usePathname } from "next/navigation";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
@@ -36,6 +37,9 @@ type TicketRow = {
   UnitPrice: number | null;
   ExtendedCost: number | null;
   JobName: string;
+  PE: string;
+  PM: string;
+  TicketSource: string;
   AcctCode: string;
   TaskDesc: string;
   AcctDesc: string;
@@ -73,6 +77,9 @@ type TicketApiRow = {
   Qty: number | string | null;
   UnitPrice: number | string | null;
   JobName: string | null;
+  PE?: string | null;
+  PM?: string | null;
+  TicketSource?: string | null;
   TicketAccountCode?: string | null;
   OnHold?: string | null;
   IsWorkingRow?: boolean | number | null;
@@ -88,6 +95,8 @@ type DateRange = {
 };
 
 type GridColumn = Column<TicketRow, unknown>;
+
+type TicketSource = "All" | "History" | "Pending";
 
 function isGridColumn(column: unknown): column is GridColumn {
   if (!column || typeof column !== "object") return false;
@@ -152,8 +161,12 @@ function AccountCodeEditor({
 
 const NO_ACCT_FILTER_VALUE = "No Acct";
 const NO_ACCT_FILTER_VALUE_NORMALIZED = NO_ACCT_FILTER_VALUE.toLowerCase();
+const NO_PE_FOUND = "No PE Found";
+const NO_PM_FOUND = "No PM Found";
 const COLUMN_ORDER_STORAGE_KEY = "grc:tickets-grid-column-order";
 const INVALID_ACCT_LABEL = "Invalid Acct";
+const UNSAVED_ACCT_WARNING_MESSAGE =
+  "You have unsaved Account Coding changes. Save before leaving?";
 type AccountValidationResult = {
   code: string;
   isValid: boolean;
@@ -256,6 +269,8 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
   const ticketNo = asString(record.TicketNo);
   const uniqueId = asString(record.UniqueID);
   const itemNo = asString(record.ItemNo);
+  const peValue = asString(record.PE);
+  const pmValue = asString(record.PM);
   // Build a stable, unique row key that includes the ticket number to avoid reuse after filtering.
   const rowIdParts = [ticketNo, uniqueId, itemNo].filter((part) => part !== "");
   const rowId =
@@ -283,6 +298,9 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
     UnitPrice: unitPriceNumber,
     ExtendedCost: extendedCost,
     JobName: asString(record.JobName),
+    PE: peValue ? peValue : NO_PE_FOUND,
+    PM: pmValue ? pmValue : NO_PM_FOUND,
+    TicketSource: asString(record.TicketSource),
     AcctCode: asString(record.TicketAccountCode),
     TaskDesc: "",
     AcctDesc: "",
@@ -294,6 +312,7 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
 };
 
 export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
+  const pathname = usePathname();
   const [rows, setRows] = useState<TicketRow[]>([]);
   const [rowsVersion, setRowsVersion] = useState(0);
   const [filters, setFilters] = useState<Partial<Record<TicketRowField, string>>>({});
@@ -301,6 +320,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [jobFilter, setJobFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
   const [orderFilter, setOrderFilter] = useState("");
+  const [peFilter, setPeFilter] = useState("All");
+  const [pmFilter, setPmFilter] = useState("All");
+  const [ticketSource, setTicketSource] = useState<TicketSource>("All");
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sortColumns, setSortColumns] = useState<SortColumn[]>([]);
@@ -308,11 +330,18 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [hasUnsavedAcctCodeChanges, setHasUnsavedAcctCodeChanges] = useState(false);
+  const [showUnsavedNavDialog, setShowUnsavedNavDialog] = useState(false);
+  const [pendingNavigationUrl, setPendingNavigationUrl] = useState<string | null>(null);
   const [, setIsValidating] = useState(false);
   const [bulkValidationSignal, setBulkValidationSignal] = useState(0);
+  const autoRetrieveTriggeredRef = useRef(false);
+  const baselineAcctCodeByIdRef = useRef<Map<string, string>>(new Map());
   const initialRowsValidationTriggeredRef = useRef(false);
   const pendingAcctCodeCommitRef = useRef<{ rowId: string; value: string } | null>(null);
   const lastBulkValidationScheduledRef = useRef(0);
+  const currentUrlRef = useRef("");
+  const allowNavigationRef = useRef(false);
 
   const collator = useMemo(
     () => new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }),
@@ -764,14 +793,17 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   }, [columnOrder, columnKeys]);
 
   const normalizedRows = useMemo(
-    () =>
-      rows.map((row) => ({
-        job: row.JobNumber.trim(),
-        customer: row.CustomerID.trim(),
-        order: row.OrderID.trim(),
-      })),
-    [rows]
-  );
+      () =>
+        rows.map((row) => ({
+          job: row.JobNumber.trim(),
+          customer: row.CustomerID.trim(),
+          order: row.OrderID.trim(),
+          source: row.TicketSource,
+          pe: row.PE.trim(),
+          pm: row.PM.trim(),
+        })),
+      [rows]
+    );
 
   const jobNameLookup = useMemo(() => {
     const map = new Map<string, string>();
@@ -788,6 +820,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     const orderCriterion = orderFilter.trim();
     const set = new Set<string>();
     normalizedRows.forEach((row) => {
+      if (ticketSource !== "All" && row.source !== ticketSource) return;
       if (customerCriterion && row.customer !== customerCriterion) return;
       if (orderCriterion && row.order !== orderCriterion) return;
       if (row.job) {
@@ -795,13 +828,14 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       }
     });
     return Array.from(set).sort(collator.compare);
-  }, [normalizedRows, collator, customerFilter, orderFilter]);
+  }, [normalizedRows, collator, customerFilter, orderFilter, ticketSource]);
 
   const customerOptions = useMemo(() => {
     const jobCriterion = jobFilter.trim();
     const orderCriterion = orderFilter.trim();
     const set = new Set<string>();
     normalizedRows.forEach((row) => {
+      if (ticketSource !== "All" && row.source !== ticketSource) return;
       if (jobCriterion && row.job !== jobCriterion) return;
       if (orderCriterion && row.order !== orderCriterion) return;
       if (row.customer) {
@@ -809,13 +843,14 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       }
     });
     return Array.from(set).sort(collator.compare);
-  }, [normalizedRows, collator, jobFilter, orderFilter]);
+  }, [normalizedRows, collator, jobFilter, orderFilter, ticketSource]);
 
   const orderOptions = useMemo(() => {
     const jobCriterion = jobFilter.trim();
     const customerCriterion = customerFilter.trim();
     const set = new Set<string>();
     normalizedRows.forEach((row) => {
+      if (ticketSource !== "All" && row.source !== ticketSource) return;
       if (jobCriterion && row.job !== jobCriterion) return;
       if (customerCriterion && row.customer !== customerCriterion) return;
       if (row.order) {
@@ -823,7 +858,41 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       }
     });
     return Array.from(set).sort(collator.compare);
-  }, [normalizedRows, collator, jobFilter, customerFilter]);
+  }, [normalizedRows, collator, jobFilter, customerFilter, ticketSource]);
+
+  const peOptions = useMemo(() => {
+    const jobCriterion = jobFilter.trim();
+    const customerCriterion = customerFilter.trim();
+    const orderCriterion = orderFilter.trim();
+    const set = new Set<string>();
+    normalizedRows.forEach((row) => {
+      if (ticketSource !== "All" && row.source !== ticketSource) return;
+      if (jobCriterion && row.job !== jobCriterion) return;
+      if (customerCriterion && row.customer !== customerCriterion) return;
+      if (orderCriterion && row.order !== orderCriterion) return;
+      if (row.pe) {
+        set.add(row.pe);
+      }
+    });
+    return ["All", ...Array.from(set).sort(collator.compare)];
+  }, [normalizedRows, collator, jobFilter, customerFilter, orderFilter, ticketSource]);
+
+  const pmOptions = useMemo(() => {
+    const jobCriterion = jobFilter.trim();
+    const customerCriterion = customerFilter.trim();
+    const orderCriterion = orderFilter.trim();
+    const set = new Set<string>();
+    normalizedRows.forEach((row) => {
+      if (ticketSource !== "All" && row.source !== ticketSource) return;
+      if (jobCriterion && row.job !== jobCriterion) return;
+      if (customerCriterion && row.customer !== customerCriterion) return;
+      if (orderCriterion && row.order !== orderCriterion) return;
+      if (row.pm) {
+        set.add(row.pm);
+      }
+    });
+    return ["All", ...Array.from(set).sort(collator.compare)];
+  }, [normalizedRows, collator, jobFilter, customerFilter, orderFilter, ticketSource]);
 
   const selectedJobName = jobFilter
     ? jobNameLookup.get(jobFilter.trim()) ?? ""
@@ -839,14 +908,23 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       if (customerCriterion && row.CustomerID.trim() !== customerCriterion) {
         return false;
       }
-      const orderCriterion = orderFilter.trim();
-      if (orderCriterion && row.OrderID.trim() !== orderCriterion) {
-        return false;
-      }
-      return true;
-    },
-    [jobFilter, customerFilter, orderFilter]
-  );
+        const orderCriterion = orderFilter.trim();
+        if (orderCriterion && row.OrderID.trim() !== orderCriterion) {
+          return false;
+        }
+        if (peFilter !== "All" && row.PE !== peFilter) {
+          return false;
+        }
+        if (pmFilter !== "All" && row.PM !== pmFilter) {
+          return false;
+        }
+        if (ticketSource !== "All" && row.TicketSource !== ticketSource) {
+          return false;
+        }
+        return true;
+      },
+      [jobFilter, customerFilter, orderFilter, peFilter, pmFilter, ticketSource]
+    );
 
   const matchesTicketDateRange = useCallback(
     (row: TicketRow) => {
@@ -991,6 +1069,9 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     jobFilter,
     customerFilter,
     orderFilter,
+    peFilter,
+    pmFilter,
+    ticketSource,
   ]);
 
   const sortedRows = useMemo(() => {
@@ -1077,12 +1158,18 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     setSaveError(null);
     setSaveMessage(null);
     setValidationError(null);
+    setTicketSource("All");
+    setPeFilter("All");
+    setPmFilter("All");
   }, []);
 
   const handleClearTopFilters = useCallback(() => {
     setJobFilter("");
     setCustomerFilter("");
     setOrderFilter("");
+    setPeFilter("All");
+    setPmFilter("All");
+    setTicketSource("All");
   }, []);
 
   const requestBulkValidation = useCallback(() => {
@@ -1148,7 +1235,10 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const topLevelFilterCount =
     (jobFilter.trim() ? 1 : 0) +
     (customerFilter.trim() ? 1 : 0) +
-    (orderFilter.trim() ? 1 : 0);
+    (orderFilter.trim() ? 1 : 0) +
+    (peFilter !== "All" ? 1 : 0) +
+    (pmFilter !== "All" ? 1 : 0) +
+    (ticketSource !== "All" ? 1 : 0);
   const hasTopFiltersApplied = topLevelFilterCount > 0;
   const hasTicketDateRange = Boolean(ticketDateRange.from || ticketDateRange.to);
   const activeFilterCount =
@@ -1610,7 +1700,14 @@ const columns = useMemo(() => {
       setJobFilter("");
       setCustomerFilter("");
       setOrderFilter("");
+      setPeFilter("All");
+      setPmFilter("All");
+      setTicketSource("All");
       setSaveMessage(null);
+      baselineAcctCodeByIdRef.current = new Map(
+        mapped.map((row) => [row.id, normalizeAccountCode(row.AcctCode ?? "")])
+      );
+      setHasUnsavedAcctCodeChanges(false);
 
       if (mapped.length > 0) {
         if (typeof queueMicrotask === "function") {
@@ -1628,11 +1725,106 @@ const columns = useMemo(() => {
     }
   }, [requestBulkValidation]);
 
-  const handleSave = useCallback(async () => {
+  useEffect(() => {
+    if (autoRetrieveTriggeredRef.current) {
+      return;
+    }
+    autoRetrieveTriggeredRef.current = true;
+    void handleRetrieve();
+  }, [handleRetrieve]);
+
+  useEffect(() => {
+    currentUrlRef.current = typeof window === "undefined" ? "" : window.location.href;
+  }, [pathname]);
+
+  useEffect(() => {
+    if (rows.length === 0 && baselineAcctCodeByIdRef.current.size === 0) {
+      setHasUnsavedAcctCodeChanges(false);
+      return;
+    }
+
+    const baseline = baselineAcctCodeByIdRef.current;
+    const hasDirtyRow = rows.some((row) => {
+      const baselineCode = baseline.get(row.id) ?? "";
+      const currentCode = normalizeAccountCode(row.AcctCode ?? "");
+      return baselineCode !== currentCode;
+    });
+    setHasUnsavedAcctCodeChanges(hasDirtyRow);
+  }, [rows]);
+
+  useEffect(() => {
+    if (!hasUnsavedAcctCodeChanges || typeof window === "undefined") {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+      return "";
+    };
+
+    const handleClick = (event: MouseEvent) => {
+      if (event.defaultPrevented) return;
+      if (allowNavigationRef.current) {
+        allowNavigationRef.current = false;
+        return;
+      }
+      let target = event.target as HTMLElement | null;
+      while (target && target.tagName !== "A") {
+        target = target.parentElement;
+      }
+      if (!target) return;
+
+      const anchor = target as HTMLAnchorElement;
+      if (anchor.target && anchor.target !== "_self") return;
+      if (anchor.hasAttribute("download")) return;
+
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) {
+        return;
+      }
+
+      const destination = new URL(anchor.href, window.location.href);
+      if (destination.origin !== window.location.origin) return;
+      if (destination.href === window.location.href) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingNavigationUrl(destination.href);
+      setShowUnsavedNavDialog(true);
+    };
+
+    const handlePopState = (event: PopStateEvent) => {
+      if (allowNavigationRef.current) {
+        allowNavigationRef.current = false;
+        return;
+      }
+
+      const destination = window.location.href;
+      event.preventDefault();
+      if (currentUrlRef.current) {
+        window.history.pushState(null, "", currentUrlRef.current);
+      }
+      setPendingNavigationUrl(destination);
+      setShowUnsavedNavDialog(true);
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("click", handleClick, true);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("click", handleClick, true);
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [hasUnsavedAcctCodeChanges]);
+
+  const handleSave = useCallback(async (): Promise<boolean> => {
     if (!hasSaveableRows) {
       setSaveError("No rows with an account code to save.");
       setSaveMessage(null);
-      return;
+      return false;
     }
 
     const candidates = rows.filter((row) => {
@@ -1654,7 +1846,7 @@ const columns = useMemo(() => {
     if (candidates.length === 0) {
       setSaveError("No rows with an account code to save.");
       setSaveMessage(null);
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -1708,16 +1900,54 @@ const columns = useMemo(() => {
       const result = (await response.json()) as { saved?: number };
       const savedCount = result?.saved ?? 0;
       setSaveMessage(`Saved ${savedCount} row${savedCount === 1 ? "" : "s"}.`);
+      baselineAcctCodeByIdRef.current = new Map(
+        rows.map((row) => [row.id, normalizeAccountCode(row.AcctCode ?? "")])
+      );
+      setHasUnsavedAcctCodeChanges(false);
+      return true;
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : "Unable to save ticket data.";
       setSaveError(message);
+      return false;
     } finally {
       setIsSaving(false);
     }
   }, [rows, hasSaveableRows]);
+
+  const handleStayOnPage = useCallback(() => {
+    setShowUnsavedNavDialog(false);
+    setPendingNavigationUrl(null);
+  }, []);
+
+  const handleLeaveWithoutSaving = useCallback(() => {
+    const destination = pendingNavigationUrl;
+    setShowUnsavedNavDialog(false);
+    setPendingNavigationUrl(null);
+    if (!destination || typeof window === "undefined") {
+      return;
+    }
+    allowNavigationRef.current = true;
+    window.location.href = destination;
+  }, [pendingNavigationUrl]);
+
+  const handleSaveAndLeave = useCallback(async () => {
+    const destination = pendingNavigationUrl;
+    if (!destination) {
+      handleStayOnPage();
+      return;
+    }
+    const saved = await handleSave();
+    if (!saved) {
+      return;
+    }
+    if (typeof window !== "undefined") {
+      allowNavigationRef.current = true;
+      window.location.href = destination;
+    }
+  }, [handleSave, handleStayOnPage, pendingNavigationUrl]);
 
   return (
     <div
@@ -1831,6 +2061,70 @@ const columns = useMemo(() => {
           </span>
         ) : null}
       </div>
+      {showUnsavedNavDialog ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="unsaved-acct-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.45)" }}
+        >
+          <div
+            className="w-full max-w-lg rounded-md border shadow-lg"
+            style={{
+              backgroundColor: "var(--gr-surface, #ffffff)",
+              borderColor: "rgba(0, 0, 0, 0.12)",
+            }}
+          >
+            <div className="px-5 py-4 border-b" style={{ borderColor: "rgba(0, 0, 0, 0.12)" }}>
+              <h2 id="unsaved-acct-dialog-title" className="text-base font-semibold">
+                Unsaved changes
+              </h2>
+            </div>
+            <div className="px-5 py-4 text-sm" style={{ color: "var(--gr-ink)" }}>
+              {UNSAVED_ACCT_WARNING_MESSAGE}
+            </div>
+            <div className="px-5 py-4 flex flex-wrap gap-3 justify-end">
+              <button
+                type="button"
+                onClick={handleStayOnPage}
+                disabled={isSaving}
+                className="px-4 py-2 rounded-md font-medium"
+                style={{
+                  ...toolbarButtonBaseStyles,
+                  cursor: isSaving ? "not-allowed" : "pointer",
+                }}
+              >
+                Stay
+              </button>
+              <button
+                type="button"
+                onClick={handleLeaveWithoutSaving}
+                disabled={isSaving}
+                className="px-4 py-2 rounded-md font-medium"
+                style={{
+                  ...toolbarButtonBaseStyles,
+                  cursor: isSaving ? "not-allowed" : "pointer",
+                }}
+              >
+                Leave Without Saving
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveAndLeave()}
+                disabled={isSaving}
+                className="px-4 py-2 rounded-md font-medium"
+                style={{
+                  ...toolbarButtonBaseStyles,
+                  cursor: isSaving ? "not-allowed" : "pointer",
+                }}
+              >
+                {isSaving ? "Saving..." : "Save & Leave"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div
         className="flex flex-wrap items-center gap-4 text-sm"
         style={{
@@ -1933,6 +2227,85 @@ const columns = useMemo(() => {
             ))}
           </datalist>
         </label>
+        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
+          PE
+          <select
+            value={peFilter}
+            onChange={(event) => setPeFilter(event.target.value)}
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 500,
+              padding: "4px 8px",
+              borderRadius: 6,
+              border: "1px solid rgba(0, 0, 0, 0.18)",
+              backgroundColor: "var(--gr-surface)",
+              color: "var(--gr-ink)",
+              minWidth: 160,
+            }}
+          >
+            {peOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
+          PM
+          <select
+            value={pmFilter}
+            onChange={(event) => setPmFilter(event.target.value)}
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 500,
+              padding: "4px 8px",
+              borderRadius: 6,
+              border: "1px solid rgba(0, 0, 0, 0.18)",
+              backgroundColor: "var(--gr-surface)",
+              color: "var(--gr-ink)",
+              minWidth: 160,
+            }}
+          >
+            {pmOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex items-center gap-2" style={{ fontWeight: 600 }}>
+          <span>Ticket Source:</span>
+          <label className="flex items-center gap-1" style={{ fontWeight: 500 }}>
+            <input
+              type="radio"
+              name="ticket-source"
+              value="All"
+              checked={ticketSource === "All"}
+              onChange={() => setTicketSource("All")}
+            />
+            All
+          </label>
+          <label className="flex items-center gap-1" style={{ fontWeight: 500 }}>
+            <input
+              type="radio"
+              name="ticket-source"
+              value="History"
+              checked={ticketSource === "History"}
+              onChange={() => setTicketSource("History")}
+            />
+            History
+          </label>
+          <label className="flex items-center gap-1" style={{ fontWeight: 500 }}>
+            <input
+              type="radio"
+              name="ticket-source"
+              value="Pending"
+              checked={ticketSource === "Pending"}
+              onChange={() => setTicketSource("Pending")}
+            />
+            Pending
+          </label>
+        </div>
         <div className="flex items-center gap-2" style={{ fontWeight: 600 }}>
           <span>Job Name:</span>
           <span style={{ fontWeight: 700 }}>{selectedJobName || "\u2014"}</span>

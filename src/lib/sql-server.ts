@@ -130,45 +130,63 @@ const extractSavedRowCount = (
 };
 
 const TICKETS_QUERY = `
-;WITH base_src AS (
+;WITH pepm AS (
     SELECT
-        TicketNo,
-        UniqueID,
-        CAST(ItemNo AS int) AS ItemNo,
-        VehicleID,
-        LocationID,
-        CustomerID,
-        OrderID,
-        ProductID,
-        Description,
-        TicketDate,
-        Unit,
-        Qty,
-        UnitPrice,
-        ExportStatus
-    FROM Tkbatch
-    WHERE VoidStatus <> 'V'
+        OrderId,
+        MAX(PE) AS PE,
+        MAX(PM) AS PM
+    FROM dbo.GRC_JDE_Intra_PE_And_PM
+    GROUP BY OrderId
+),
+base_src AS (
+    SELECT
+        t.TicketNo,
+        t.UniqueID,
+        CAST(t.ItemNo AS int) AS ItemNo,
+        t.VehicleID,
+        t.LocationID,
+        t.CustomerID,
+        t.OrderID,
+        t.ProductID,
+        t.Description,
+        t.TicketDate,
+        t.Unit,
+        t.Qty,
+        t.UnitPrice,
+        t.ExportStatus,
+        COALESCE(pepm.PE, 'No PE Found') AS PE,
+        COALESCE(pepm.PM, 'No PM Found') AS PM,
+        'Pending' AS SourceGroup
+    FROM Tkbatch AS t
+    LEFT JOIN pepm
+      ON pepm.OrderId = t.OrderID
+    WHERE t.VoidStatus <> 'V'
     
     UNION ALL
     
     SELECT
-        TicketNo,
-        UniqueID,
-        CAST(ItemNo AS int) AS ItemNo,
-        VehicleID,
-        LocationID,
-        CustomerID,
-        OrderID,
-        ProductID,
-        Description,
-        TicketDate,
-        Unit,
-        Qty,
-        UnitPrice,
-        ExportStatus
-    FROM Tkhist1
-    WHERE ExportStatus <> 'E'
-      AND VoidStatus <> 'V'
+        t.TicketNo,
+        t.UniqueID,
+        CAST(t.ItemNo AS int) AS ItemNo,
+        t.VehicleID,
+        t.LocationID,
+        t.CustomerID,
+        t.OrderID,
+        t.ProductID,
+        t.Description,
+        t.TicketDate,
+        t.Unit,
+        t.Qty,
+        t.UnitPrice,
+        t.ExportStatus,
+        COALESCE(pepm.PE, 'No PE Found') AS PE,
+        COALESCE(pepm.PM, 'No PM Found') AS PM,
+        'History' AS SourceGroup
+    FROM Tkhist1 AS t
+    LEFT JOIN pepm
+      ON pepm.OrderId = t.OrderID
+    WHERE t.ExportStatus <> 'E'
+      AND t.VoidStatus <> 'V'
 ),
 other_src AS (
     SELECT
@@ -180,7 +198,8 @@ other_src AS (
         Description,
         Unit,
         Qty,
-        UnitPrice
+        UnitPrice,
+        'Pending' AS SourceGroup
     FROM Tkeother
     WHERE VoidStatus <> 'V'
     
@@ -195,7 +214,8 @@ other_src AS (
         Description,
         Unit,
         Qty,
-        UnitPrice
+        UnitPrice,
+        'History' AS SourceGroup
     FROM Tkohist
     WHERE VoidStatus <> 'V'
 ),
@@ -215,7 +235,8 @@ freight_src AS (
         END AS Unit,
         FreightQty     AS Qty,
         FreightRate    AS UnitPrice,
-        FreightAmount
+        FreightAmount,
+        'Pending' AS SourceGroup
     FROM Tkbatch
     WHERE VoidStatus <> 'V'
       AND FreightAmount > 0
@@ -235,7 +256,8 @@ freight_src AS (
         END AS Unit,
         FreightQty     AS Qty,
         FreightRate    AS UnitPrice,
-        FreightAmount
+        FreightAmount,
+        'History' AS SourceGroup
     FROM Tkhist1
     WHERE ExportStatus <> 'E'
       AND VoidStatus <> 'V'
@@ -259,6 +281,9 @@ base AS (
         b.Qty,
         b.UnitPrice,
         o.Description1 AS JobName,
+        b.PE,
+        b.PM,
+        b.SourceGroup,
         0 AS SourceRank
     FROM base_src AS b
     INNER JOIN Slordnam AS o ON b.OrderID    = o.OrderID
@@ -291,6 +316,9 @@ e_raw AS (
         e.Qty,
         e.UnitPrice,
         o.Description1 AS JobName,
+        b.PE,
+        b.PM,
+        b.SourceGroup,
         1 AS SourceRank,
         CAST(0 AS bit) AS IsFreight
     FROM other_src AS e
@@ -321,6 +349,9 @@ e_raw AS (
         f.Qty,
         f.UnitPrice,
         o.Description1 AS JobName,
+        b.PE,
+        b.PM,
+        b.SourceGroup,
         1 AS SourceRank,
         CAST(1 AS bit) AS IsFreight
     FROM freight_src AS f
@@ -356,6 +387,9 @@ e_seq AS (
         d.Qty,
         d.UnitPrice,
         d.JobName,
+        d.PE,
+        d.PM,
+        d.SourceGroup,
         d.SourceRank,
         d.IsFreight,
         ROW_NUMBER() OVER (
@@ -386,6 +420,9 @@ final_rows AS (
         b.Qty,
         b.UnitPrice,
         b.JobName,
+        b.PE,
+        b.PM,
+        b.SourceGroup,
         b.SourceRank
     FROM base AS b
 
@@ -407,6 +444,9 @@ final_rows AS (
         e.Qty,
         e.UnitPrice,
         e.JobName,
+        e.PE,
+        e.PM,
+        e.SourceGroup,
         e.SourceRank
     FROM e_seq AS e
     JOIN base_max AS m
@@ -430,6 +470,9 @@ annotated AS (
         fr.Qty,
         fr.UnitPrice,
         fr.JobName,
+        fr.PE,
+        fr.PM,
+        fr.SourceGroup,
         fr.SourceRank,
         COALESCE(
             w.Ticket_AccountCode,
@@ -482,6 +525,9 @@ SELECT
     Qty,
     UnitPrice,
     JobName,
+    PE,
+    PM,
+    SourceGroup AS TicketSource,
     Ticket_AccountCode AS TicketAccountCode,
     OnHold,
     IsWorkingRow,
@@ -524,6 +570,9 @@ export type TicketRecord = {
   Qty: number | string | null;
   UnitPrice: number | string | null;
   JobName: string | null;
+  PE: string | null;
+  PM: string | null;
+  TicketSource: string | null;
   TicketAccountCode: string | null;
   OnHold: string | null;
   IsWorkingRow: boolean | number | null;
