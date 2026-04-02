@@ -14,6 +14,7 @@ import { usePathname } from "next/navigation";
 import type { FilterInputType } from "./HeaderFilter";
 import { HeaderFilter } from "./HeaderFilter";
 import { DraggableCell, type DragLocation } from "./DraggableCell";
+import { ToolbarMultiSelect } from "./ToolbarMultiSelect";
 
 type AccountValidationStatus = "unknown" | "pending" | "valid" | "invalid";
 
@@ -220,10 +221,21 @@ const currencyFormatter = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 2,
 });
 
+const decimalFormatter = new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 const formatCurrency = (value: number | null | undefined): string => {
   if (value === null || value === undefined) return "";
   if (!Number.isFinite(value)) return "";
   return currencyFormatter.format(value);
+};
+
+const formatDecimal = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return "";
+  if (!Number.isFinite(value)) return "";
+  return decimalFormatter.format(value);
 };
 
 const asString = (value: string | number | null | undefined): string => {
@@ -272,7 +284,10 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
   const peValue = asString(record.PE);
   const pmValue = asString(record.PM);
   // Build a stable, unique row key that includes the ticket number to avoid reuse after filtering.
-  const rowIdParts = [ticketNo, uniqueId, itemNo].filter((part) => part !== "");
+  // TicketSource is included to disambiguate rows from different source tables (Tkbatch, Tkhist1, etc.)
+  // that may share the same TicketNo/UniqueID/ItemNo.
+  const ticketSource = asString(record.TicketSource);
+  const rowIdParts = [ticketNo, uniqueId, itemNo, ticketSource].filter((part) => part !== "");
   const rowId =
     rowIdParts.length > 0
       ? rowIdParts.join("-")
@@ -315,13 +330,19 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   const pathname = usePathname();
   const [rows, setRows] = useState<TicketRow[]>([]);
   const [rowsVersion, setRowsVersion] = useState(0);
-  const [filters, setFilters] = useState<Partial<Record<TicketRowField, string>>>({});
+  const [textFilters, setTextFilters] = useState<Partial<Record<TicketRowField, string>>>(
+    {}
+  );
+  const [selectedFilters, setSelectedFilters] = useState<
+    Partial<Record<TicketRowField, string[]>>
+  >({});
   const [ticketDateRange, setTicketDateRange] = useState<DateRange>({ from: "", to: "" });
-  const [jobFilter, setJobFilter] = useState("");
-  const [customerFilter, setCustomerFilter] = useState("");
-  const [orderFilter, setOrderFilter] = useState("");
-  const [peFilter, setPeFilter] = useState("All");
-  const [pmFilter, setPmFilter] = useState("All");
+  const [jobFilters, setJobFilters] = useState<string[]>([]);
+  const [customerFilters, setCustomerFilters] = useState<string[]>([]);
+  const [orderFilters, setOrderFilters] = useState<string[]>([]);
+  const [peFilters, setPeFilters] = useState<string[]>([]);
+  const [pmFilters, setPmFilters] = useState<string[]>([]);
+  const [acctCodeFilter, setAcctCodeFilter] = useState<"All" | "NoAcct" | "HasAcct">("All");
   const [ticketSource, setTicketSource] = useState<TicketSource>("All");
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -662,7 +683,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       },
       {
         key: "UnitPrice",
-        name: "Unit Price",
+        name: "Unit Cost",
         width: 120,
       },
       {
@@ -801,6 +822,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
           source: row.TicketSource,
           pe: row.PE.trim(),
           pm: row.PM.trim(),
+          hasAcct: (row.AcctCode ?? "").trim() !== "",
         })),
       [rows]
     );
@@ -815,116 +837,174 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     return map;
   }, [rows]);
 
+  const matchesSelectedTopFilter = useCallback(
+    (value: string, selectedValues: string[]) =>
+      selectedValues.length === 0 || selectedValues.includes(value),
+    []
+  );
+
+  const matchesNormalizedTopFilters = useCallback(
+    (
+      row: {
+        job: string;
+        customer: string;
+        order: string;
+        source: string;
+        pe: string;
+        pm: string;
+        hasAcct: boolean;
+      },
+      ignoredFilter?: "job" | "customer" | "order" | "pe" | "pm"
+    ) => {
+      if (ticketSource !== "All" && row.source !== ticketSource) {
+        return false;
+      }
+      if (acctCodeFilter === "NoAcct" && row.hasAcct) return false;
+      if (acctCodeFilter === "HasAcct" && !row.hasAcct) return false;
+      if (
+        ignoredFilter !== "job" &&
+        !matchesSelectedTopFilter(row.job, jobFilters)
+      ) {
+        return false;
+      }
+      if (
+        ignoredFilter !== "customer" &&
+        !matchesSelectedTopFilter(row.customer, customerFilters)
+      ) {
+        return false;
+      }
+      if (
+        ignoredFilter !== "order" &&
+        !matchesSelectedTopFilter(row.order, orderFilters)
+      ) {
+        return false;
+      }
+      if (
+        ignoredFilter !== "pe" &&
+        !matchesSelectedTopFilter(row.pe, peFilters)
+      ) {
+        return false;
+      }
+      if (
+        ignoredFilter !== "pm" &&
+        !matchesSelectedTopFilter(row.pm, pmFilters)
+      ) {
+        return false;
+      }
+      return true;
+    },
+    [
+      ticketSource,
+      acctCodeFilter,
+      matchesSelectedTopFilter,
+      jobFilters,
+      customerFilters,
+      orderFilters,
+      peFilters,
+      pmFilters,
+    ]
+  );
+
   const jobOptions = useMemo(() => {
-    const customerCriterion = customerFilter.trim();
-    const orderCriterion = orderFilter.trim();
     const set = new Set<string>();
     normalizedRows.forEach((row) => {
-      if (ticketSource !== "All" && row.source !== ticketSource) return;
-      if (customerCriterion && row.customer !== customerCriterion) return;
-      if (orderCriterion && row.order !== orderCriterion) return;
+      if (!matchesNormalizedTopFilters(row, "job")) return;
       if (row.job) {
         set.add(row.job);
       }
     });
     return Array.from(set).sort(collator.compare);
-  }, [normalizedRows, collator, customerFilter, orderFilter, ticketSource]);
+  }, [normalizedRows, collator, matchesNormalizedTopFilters]);
 
   const customerOptions = useMemo(() => {
-    const jobCriterion = jobFilter.trim();
-    const orderCriterion = orderFilter.trim();
     const set = new Set<string>();
     normalizedRows.forEach((row) => {
-      if (ticketSource !== "All" && row.source !== ticketSource) return;
-      if (jobCriterion && row.job !== jobCriterion) return;
-      if (orderCriterion && row.order !== orderCriterion) return;
+      if (!matchesNormalizedTopFilters(row, "customer")) return;
       if (row.customer) {
         set.add(row.customer);
       }
     });
     return Array.from(set).sort(collator.compare);
-  }, [normalizedRows, collator, jobFilter, orderFilter, ticketSource]);
+  }, [normalizedRows, collator, matchesNormalizedTopFilters]);
 
   const orderOptions = useMemo(() => {
-    const jobCriterion = jobFilter.trim();
-    const customerCriterion = customerFilter.trim();
     const set = new Set<string>();
     normalizedRows.forEach((row) => {
-      if (ticketSource !== "All" && row.source !== ticketSource) return;
-      if (jobCriterion && row.job !== jobCriterion) return;
-      if (customerCriterion && row.customer !== customerCriterion) return;
+      if (!matchesNormalizedTopFilters(row, "order")) return;
       if (row.order) {
         set.add(row.order);
       }
     });
     return Array.from(set).sort(collator.compare);
-  }, [normalizedRows, collator, jobFilter, customerFilter, ticketSource]);
+  }, [normalizedRows, collator, matchesNormalizedTopFilters]);
 
   const peOptions = useMemo(() => {
-    const jobCriterion = jobFilter.trim();
-    const customerCriterion = customerFilter.trim();
-    const orderCriterion = orderFilter.trim();
     const set = new Set<string>();
     normalizedRows.forEach((row) => {
-      if (ticketSource !== "All" && row.source !== ticketSource) return;
-      if (jobCriterion && row.job !== jobCriterion) return;
-      if (customerCriterion && row.customer !== customerCriterion) return;
-      if (orderCriterion && row.order !== orderCriterion) return;
+      if (!matchesNormalizedTopFilters(row, "pe")) return;
       if (row.pe) {
         set.add(row.pe);
       }
     });
-    return ["All", ...Array.from(set).sort(collator.compare)];
-  }, [normalizedRows, collator, jobFilter, customerFilter, orderFilter, ticketSource]);
+    return Array.from(set).sort(collator.compare);
+  }, [normalizedRows, collator, matchesNormalizedTopFilters]);
 
   const pmOptions = useMemo(() => {
-    const jobCriterion = jobFilter.trim();
-    const customerCriterion = customerFilter.trim();
-    const orderCriterion = orderFilter.trim();
     const set = new Set<string>();
     normalizedRows.forEach((row) => {
-      if (ticketSource !== "All" && row.source !== ticketSource) return;
-      if (jobCriterion && row.job !== jobCriterion) return;
-      if (customerCriterion && row.customer !== customerCriterion) return;
-      if (orderCriterion && row.order !== orderCriterion) return;
+      if (!matchesNormalizedTopFilters(row, "pm")) return;
       if (row.pm) {
         set.add(row.pm);
       }
     });
-    return ["All", ...Array.from(set).sort(collator.compare)];
-  }, [normalizedRows, collator, jobFilter, customerFilter, orderFilter, ticketSource]);
+    return Array.from(set).sort(collator.compare);
+  }, [normalizedRows, collator, matchesNormalizedTopFilters]);
 
-  const selectedJobName = jobFilter
-    ? jobNameLookup.get(jobFilter.trim()) ?? ""
-    : "";
+  const selectedJobName =
+    jobFilters.length === 1
+      ? jobNameLookup.get(jobFilters[0]) ?? ""
+      : jobFilters.length > 1
+      ? `${jobFilters.length} jobs selected`
+      : "";
 
   const matchesTopLevelFilters = useCallback(
     (row: TicketRow) => {
-      const jobCriterion = jobFilter.trim();
-      if (jobCriterion && row.JobNumber.trim() !== jobCriterion) {
+      if (!matchesSelectedTopFilter(row.JobNumber.trim(), jobFilters)) {
         return false;
       }
-      const customerCriterion = customerFilter.trim();
-      if (customerCriterion && row.CustomerID.trim() !== customerCriterion) {
+      if (!matchesSelectedTopFilter(row.CustomerID.trim(), customerFilters)) {
         return false;
       }
-        const orderCriterion = orderFilter.trim();
-        if (orderCriterion && row.OrderID.trim() !== orderCriterion) {
-          return false;
-        }
-        if (peFilter !== "All" && row.PE !== peFilter) {
-          return false;
-        }
-        if (pmFilter !== "All" && row.PM !== pmFilter) {
-          return false;
-        }
-        if (ticketSource !== "All" && row.TicketSource !== ticketSource) {
-          return false;
-        }
-        return true;
-      },
-      [jobFilter, customerFilter, orderFilter, peFilter, pmFilter, ticketSource]
-    );
+      if (!matchesSelectedTopFilter(row.OrderID.trim(), orderFilters)) {
+        return false;
+      }
+      if (!matchesSelectedTopFilter(row.PE, peFilters)) {
+        return false;
+      }
+      if (!matchesSelectedTopFilter(row.PM, pmFilters)) {
+        return false;
+      }
+      if (ticketSource !== "All" && row.TicketSource !== ticketSource) {
+        return false;
+      }
+      if (acctCodeFilter !== "All") {
+        const hasAcct = (row.AcctCode ?? "").trim() !== "";
+        if (acctCodeFilter === "NoAcct" && hasAcct) return false;
+        if (acctCodeFilter === "HasAcct" && !hasAcct) return false;
+      }
+      return true;
+    },
+    [
+      matchesSelectedTopFilter,
+      jobFilters,
+      customerFilters,
+      orderFilters,
+      peFilters,
+      pmFilters,
+      ticketSource,
+      acctCodeFilter,
+    ]
+  );
 
   const matchesTicketDateRange = useCallback(
     (row: TicketRow) => {
@@ -940,53 +1020,91 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     [ticketDateRange.from, ticketDateRange.to]
   );
 
-  const columnOptions = useMemo(() => {
-    const filterEntries = (Object.entries(filters) as Array<[TicketRowField, string]>).filter(
-      ([, value]) => Boolean(value)
-    );
-
-    const baseRows = rows.filter(
-      (row) => matchesTopLevelFilters(row) && matchesTicketDateRange(row)
-    );
-
-    const matchesFilter = (
+  const matchesFilterValue = useCallback(
+    (
       row: TicketRow,
       key: TicketRowField,
-      filterValue: string
+      filterValue: string,
+      mode: "contains" | "exact"
     ): boolean => {
-      if (!filterValue) return true;
-
       const normalizedFilter = filterValue.trim().toLowerCase();
+      if (!normalizedFilter) return true;
+
       if (key === "AcctCode" && normalizedFilter === NO_ACCT_FILTER_VALUE_NORMALIZED) {
         const rawValue = row[key];
         const normalizedValue =
-          rawValue === undefined || rawValue === null
-            ? ""
-            : String(rawValue).trim();
+          rawValue === undefined || rawValue === null ? "" : String(rawValue).trim();
         return normalizedValue === "";
       }
 
       const cellValue = row[key];
       if (cellValue === undefined || cellValue === null) return false;
 
-      if (dateColumns.has(key)) {
-        return String(cellValue) === filterValue;
+      const candidate =
+        key === "Qty"
+          ? formatDecimal(cellValue as number)
+          : key === "UnitPrice"
+          ? formatCurrency(cellValue as number)
+          : String(cellValue).trim();
+      if (dateColumns.has(key) || mode === "exact") {
+        return candidate.toLowerCase() === normalizedFilter;
       }
 
-      const candidate = String(cellValue).toLowerCase();
-      return candidate.includes(filterValue.toLowerCase());
-    };
+      return candidate.toLowerCase().includes(normalizedFilter);
+    },
+    [dateColumns]
+  );
+
+  const matchesColumnFilters = useCallback(
+    (
+      row: TicketRow,
+      key: TicketRowField,
+      textFilter: string | undefined,
+      selectedValues: string[] | undefined
+    ): boolean => {
+      const normalizedSelections =
+        selectedValues?.filter((value) => value.trim() !== "") ?? [];
+      if (
+        normalizedSelections.length > 0 &&
+        !normalizedSelections.some((value) =>
+          matchesFilterValue(row, key, value, "exact")
+        )
+      ) {
+        return false;
+      }
+
+      if (textFilter && !matchesFilterValue(row, key, textFilter, "contains")) {
+        return false;
+      }
+
+      return true;
+    },
+    [matchesFilterValue]
+  );
+
+  const columnOptions = useMemo(() => {
+    const activeFilterKeys = columnKeys.filter((key) => {
+      const textValue = textFilters[key];
+      const selectedValues = selectedFilters[key];
+      return Boolean(textValue?.trim()) || Boolean(selectedValues?.length);
+    });
+
+    const baseRows = rows.filter(
+      (row) => matchesTopLevelFilters(row) && matchesTicketDateRange(row)
+    );
 
     const optionsMap = new Map<TicketRowField, string[]>();
 
     columnKeys.forEach((columnKey) => {
-      const otherFilters = filterEntries.filter(([key]) => key !== columnKey);
+      const otherFilterKeys = activeFilterKeys.filter((key) => key !== columnKey);
 
       const relevantRows =
-        otherFilters.length === 0
+        otherFilterKeys.length === 0
           ? baseRows
           : baseRows.filter((row) =>
-              otherFilters.every(([key, filterValue]) => matchesFilter(row, key, filterValue))
+              otherFilterKeys.every((key) =>
+                matchesColumnFilters(row, key, textFilters[key], selectedFilters[key])
+              )
             );
 
       const valueSet = new Set<string>();
@@ -994,7 +1112,13 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       relevantRows.forEach((row) => {
         const value = row[columnKey];
         const normalizedValue =
-          value === undefined || value === null ? "" : String(value).trim();
+          value === undefined || value === null
+            ? ""
+            : columnKey === "Qty"
+            ? formatDecimal(value as number)
+            : columnKey === "UnitPrice"
+            ? formatCurrency(value as number)
+            : String(value).trim();
         if (normalizedValue === "") {
           if (columnKey === "AcctCode") {
             includeNoAcctOption = true;
@@ -1022,11 +1146,12 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   }, [
     rows,
     columnKeys,
-    filters,
-    dateColumns,
+    textFilters,
+    selectedFilters,
     collator,
     matchesTopLevelFilters,
     matchesTicketDateRange,
+    matchesColumnFilters,
   ]);
 
   const filteredRows = useMemo(() => {
@@ -1034,44 +1159,26 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
       (row) => matchesTopLevelFilters(row) && matchesTicketDateRange(row)
     );
 
-    if (Object.keys(filters).length === 0) return rowsWithTopLevelFilters;
+    const hasColumnFilters = columnKeys.some((key) => {
+      const textValue = textFilters[key];
+      const selectedValues = selectedFilters[key];
+      return Boolean(textValue?.trim()) || Boolean(selectedValues?.length);
+    });
+
+    if (!hasColumnFilters) return rowsWithTopLevelFilters;
     return rowsWithTopLevelFilters.filter((row) =>
-      (Object.entries(filters) as Array<[TicketRowField, string]>).every(
-        ([key, filterValue]) => {
-          if (!filterValue) return true;
-
-          const normalizedFilter = filterValue.trim().toLowerCase();
-          if (key === "AcctCode" && normalizedFilter === NO_ACCT_FILTER_VALUE_NORMALIZED) {
-            const rawValue = row[key];
-            const normalizedValue =
-              rawValue === undefined || rawValue === null ? "" : String(rawValue).trim();
-            return normalizedValue === "";
-          }
-
-          const cellValue = row[key];
-          if (cellValue === undefined || cellValue === null) return false;
-
-          if (dateColumns.has(key)) {
-            return String(cellValue) === filterValue;
-          }
-
-          const candidate = String(cellValue).toLowerCase();
-          return candidate.includes(filterValue.toLowerCase());
-        }
+      columnKeys.every((key) =>
+        matchesColumnFilters(row, key, textFilters[key], selectedFilters[key])
       )
     );
   }, [
     rows,
-    filters,
-    dateColumns,
+    columnKeys,
+    textFilters,
+    selectedFilters,
     matchesTopLevelFilters,
     matchesTicketDateRange,
-    jobFilter,
-    customerFilter,
-    orderFilter,
-    peFilter,
-    pmFilter,
-    ticketSource,
+    matchesColumnFilters,
   ]);
 
   const sortedRows = useMemo(() => {
@@ -1152,24 +1259,30 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
   );
 
   const handleReset = useCallback(() => {
-    setFilters({});
+    setTextFilters({});
+    setSelectedFilters({});
     setTicketDateRange({ from: "", to: "" });
     setSortColumns([]);
     setSaveError(null);
     setSaveMessage(null);
     setValidationError(null);
     setTicketSource("All");
-    setPeFilter("All");
-    setPmFilter("All");
+    setAcctCodeFilter("All");
+    setJobFilters([]);
+    setCustomerFilters([]);
+    setOrderFilters([]);
+    setPeFilters([]);
+    setPmFilters([]);
   }, []);
 
   const handleClearTopFilters = useCallback(() => {
-    setJobFilter("");
-    setCustomerFilter("");
-    setOrderFilter("");
-    setPeFilter("All");
-    setPmFilter("All");
+    setJobFilters([]);
+    setCustomerFilters([]);
+    setOrderFilters([]);
+    setPeFilters([]);
+    setPmFilters([]);
     setTicketSource("All");
+    setAcctCodeFilter("All");
   }, []);
 
   const requestBulkValidation = useCallback(() => {
@@ -1233,16 +1346,20 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
 
   const totalRowCount = rows.length;
   const topLevelFilterCount =
-    (jobFilter.trim() ? 1 : 0) +
-    (customerFilter.trim() ? 1 : 0) +
-    (orderFilter.trim() ? 1 : 0) +
-    (peFilter !== "All" ? 1 : 0) +
-    (pmFilter !== "All" ? 1 : 0) +
-    (ticketSource !== "All" ? 1 : 0);
+    (jobFilters.length > 0 ? 1 : 0) +
+    (customerFilters.length > 0 ? 1 : 0) +
+    (orderFilters.length > 0 ? 1 : 0) +
+    (peFilters.length > 0 ? 1 : 0) +
+    (pmFilters.length > 0 ? 1 : 0) +
+    (ticketSource !== "All" ? 1 : 0) +
+    (acctCodeFilter !== "All" ? 1 : 0);
   const hasTopFiltersApplied = topLevelFilterCount > 0;
   const hasTicketDateRange = Boolean(ticketDateRange.from || ticketDateRange.to);
   const activeFilterCount =
-    Object.keys(filters).length + topLevelFilterCount + (hasTicketDateRange ? 1 : 0);
+    Object.keys(textFilters).length +
+    Object.keys(selectedFilters).length +
+    topLevelFilterCount +
+    (hasTicketDateRange ? 1 : 0);
   const filteredRowCount = activeFilterCount > 0 ? filteredRows.length : 0;
   const hasSaveableRows = useMemo(
     () =>
@@ -1271,12 +1388,30 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
     return null;
   }, [saveError, saveMessage]);
 
-  const handleFilterChange = useCallback(
+  const handleTextFilterChange = useCallback(
     (key: TicketRowField, value: string) => {
-      setFilters((prev) => {
+      setTextFilters((prev) => {
         const next = { ...prev };
-        if (value) {
+        if (value.trim()) {
           next[key] = value;
+        } else {
+          delete next[key];
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleSelectedFilterChange = useCallback(
+    (key: TicketRowField, values: string[]) => {
+      setSelectedFilters((prev) => {
+        const normalizedValues = Array.from(
+          new Set(values.map((value) => value.trim()).filter((value) => value !== ""))
+        );
+        const next = { ...prev };
+        if (normalizedValues.length > 0) {
+          next[key] = normalizedValues;
         } else {
           delete next[key];
         }
@@ -1442,12 +1577,16 @@ const columns = useMemo(() => {
           renderHeaderCell: () => (
             <HeaderFilter
               label={String(column.name)}
-              value={filters[columnKey] ?? ""}
+              value={textFilters[columnKey] ?? ""}
+              selectedValues={selectedFilters[columnKey] ?? []}
               type={inputType}
               rangeValue={isTicketDateColumn ? ticketDateRange : undefined}
               onRangeChange={isTicketDateColumn ? setTicketDateRange : undefined}
               options={columnOptions.get(columnKey)}
-              onChange={(value) => handleFilterChange(columnKey, value)}
+              onChange={(value) => handleTextFilterChange(columnKey, value)}
+              onSelectedValuesChange={(values) =>
+                handleSelectedFilterChange(columnKey, values)
+              }
               onLabelClick={(event) => toggleSortColumn(columnKey, event.shiftKey)}
               sortDirection={sortEntry?.direction ?? null}
             />
@@ -1458,12 +1597,20 @@ const columns = useMemo(() => {
             const isAcctColumn = columnKey === "AcctCode";
             const isTaskDescColumn = columnKey === "TaskDesc";
             const isAcctDescColumn = columnKey === "AcctDesc";
+            const isRightAlignedColumn =
+              columnKey === "Qty" ||
+              columnKey === "UnitPrice" ||
+              columnKey === "ExtendedCost";
             const isValidationColumn =
               isAcctColumn || isTaskDescColumn || isAcctDescColumn;
 
             const renderValue =
               columnKey === "TicketDate"
                 ? () => cellProps.row.TicketDateDisplay ?? ""
+                : columnKey === "Qty"
+                ? () => formatDecimal(cellProps.row.Qty)
+                : columnKey === "UnitPrice"
+                ? () => formatCurrency(cellProps.row.UnitPrice)
                 : columnKey === "ExtendedCost"
                 ? () => formatCurrency(cellProps.row.ExtendedCost)
                 : isAcctColumn
@@ -1481,6 +1628,9 @@ const columns = useMemo(() => {
                 : undefined;
 
             const extraClasses: string[] = [];
+            if (isRightAlignedColumn) {
+              extraClasses.push("rdg-draggable-cell-right");
+            }
             if (status === "invalid" && isValidationColumn) {
               extraClasses.push("bg-red-100", "text-red-800");
             }
@@ -1508,9 +1658,11 @@ const columns = useMemo(() => {
     baseColumnMap,
     columnOptions,
     dateColumns,
-    filters,
+    textFilters,
+    selectedFilters,
     handleCellValueDrop,
-    handleFilterChange,
+    handleSelectedFilterChange,
+    handleTextFilterChange,
     numericColumns,
     ticketDateRange,
     columnOrder,
@@ -1695,14 +1847,16 @@ const columns = useMemo(() => {
       const mapped = data.rows.map((record, index) => toTicketRow(record, index));
       setRows(mapped);
       setRowsVersion((prev) => prev + 1);
-      setFilters({});
+      setTextFilters({});
+      setSelectedFilters({});
       setTicketDateRange({ from: "", to: "" });
-      setJobFilter("");
-      setCustomerFilter("");
-      setOrderFilter("");
-      setPeFilter("All");
-      setPmFilter("All");
+      setJobFilters([]);
+      setCustomerFilters([]);
+      setOrderFilters([]);
+      setPeFilters([]);
+      setPmFilters([]);
       setTicketSource("All");
+      setAcctCodeFilter("All");
       setSaveMessage(null);
       baselineAcctCodeByIdRef.current = new Map(
         mapped.map((row) => [row.id, normalizeAccountCode(row.AcctCode ?? "")])
@@ -2155,124 +2309,68 @@ const columns = useMemo(() => {
         >
           Reset Filters
         </button>
-        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
-          Job #
-          <input
-            list="tickets-job-filter-options"
-            value={jobFilter}
-            onChange={(event) => setJobFilter(event.target.value)}
-            placeholder="All jobs"
-            style={{
-              fontSize: "0.8rem",
-              fontWeight: 500,
-              padding: "4px 8px",
-              borderRadius: 6,
-              border: "1px solid rgba(0, 0, 0, 0.18)",
-              backgroundColor: "var(--gr-surface)",
-              color: "var(--gr-ink)",
-              minWidth: 140,
-            }}
-          />
-          <datalist id="tickets-job-filter-options">
-            {jobOptions.map((option) => (
-              <option key={option} value={option} />
-            ))}
-          </datalist>
-        </label>
-        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
-          Customer #
-          <input
-            list="tickets-customer-filter-options"
-            value={customerFilter}
-            onChange={(event) => setCustomerFilter(event.target.value)}
-            placeholder="All customers"
-            style={{
-              fontSize: "0.8rem",
-              fontWeight: 500,
-              padding: "4px 8px",
-              borderRadius: 6,
-              border: "1px solid rgba(0, 0, 0, 0.18)",
-              backgroundColor: "var(--gr-surface)",
-              color: "var(--gr-ink)",
-              minWidth: 140,
-            }}
-          />
-          <datalist id="tickets-customer-filter-options">
-            {customerOptions.map((option) => (
-              <option key={option} value={option} />
-            ))}
-          </datalist>
-        </label>
-        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
-          Order #
-          <input
-            list="tickets-order-filter-options"
-            value={orderFilter}
-            onChange={(event) => setOrderFilter(event.target.value)}
-            placeholder="All orders"
-            style={{
-              fontSize: "0.8rem",
-              fontWeight: 500,
-              padding: "4px 8px",
-              borderRadius: 6,
-              border: "1px solid rgba(0, 0, 0, 0.18)",
-              backgroundColor: "var(--gr-surface)",
-              color: "var(--gr-ink)",
-              minWidth: 140,
-            }}
-          />
-          <datalist id="tickets-order-filter-options">
-            {orderOptions.map((option) => (
-              <option key={option} value={option} />
-            ))}
-          </datalist>
-        </label>
-        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
-          PE
+        <ToolbarMultiSelect
+          label="Job #"
+          options={jobOptions}
+          selectedValues={jobFilters}
+          onChange={setJobFilters}
+          placeholder="All jobs"
+          minWidth={140}
+        />
+        <ToolbarMultiSelect
+          label="Customer #"
+          options={customerOptions}
+          selectedValues={customerFilters}
+          onChange={setCustomerFilters}
+          placeholder="All customers"
+          minWidth={140}
+        />
+        <ToolbarMultiSelect
+          label="Order #"
+          options={orderOptions}
+          selectedValues={orderFilters}
+          onChange={setOrderFilters}
+          placeholder="All orders"
+          minWidth={140}
+        />
+        <ToolbarMultiSelect
+          label="PE"
+          options={peOptions}
+          selectedValues={peFilters}
+          onChange={setPeFilters}
+          placeholder="All PEs"
+          minWidth={160}
+        />
+        <ToolbarMultiSelect
+          label="PM"
+          options={pmOptions}
+          selectedValues={pmFilters}
+          onChange={setPmFilters}
+          placeholder="All PMs"
+          minWidth={160}
+        />
+        <div className="flex items-center gap-2" style={{ fontWeight: 600 }}>
+          <span>Acct Code:</span>
           <select
-            value={peFilter}
-            onChange={(event) => setPeFilter(event.target.value)}
+            value={acctCodeFilter}
+            onChange={(e) => setAcctCodeFilter(e.target.value as "All" | "NoAcct" | "HasAcct")}
             style={{
               fontSize: "0.8rem",
-              fontWeight: 500,
+              fontWeight: acctCodeFilter !== "All" ? 600 : 500,
               padding: "4px 8px",
               borderRadius: 6,
               border: "1px solid rgba(0, 0, 0, 0.18)",
               backgroundColor: "var(--gr-surface)",
               color: "var(--gr-ink)",
-              minWidth: 160,
+              minWidth: 120,
+              cursor: "pointer",
             }}
           >
-            {peOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
+            <option value="All">All</option>
+            <option value="NoAcct">No Acct</option>
+            <option value="HasAcct">Has Acct</option>
           </select>
-        </label>
-        <label className="flex items-center gap-2" style={{ fontWeight: 600 }}>
-          PM
-          <select
-            value={pmFilter}
-            onChange={(event) => setPmFilter(event.target.value)}
-            style={{
-              fontSize: "0.8rem",
-              fontWeight: 500,
-              padding: "4px 8px",
-              borderRadius: 6,
-              border: "1px solid rgba(0, 0, 0, 0.18)",
-              backgroundColor: "var(--gr-surface)",
-              color: "var(--gr-ink)",
-              minWidth: 160,
-            }}
-          >
-            {pmOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
+        </div>
         <div className="flex items-center gap-2" style={{ fontWeight: 600 }}>
           <span>Ticket Source:</span>
           <label className="flex items-center gap-1" style={{ fontWeight: 500 }}>

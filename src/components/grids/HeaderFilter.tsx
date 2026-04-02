@@ -11,9 +11,11 @@ import type {
 type HeaderFilterProps = {
   label: string;
   value?: string;
+  selectedValues?: string[];
   type: FilterInputType;
   options?: string[];
   onChange: (value: string) => void;
+  onSelectedValuesChange?: (values: string[]) => void;
   rangeValue?: { from: string; to: string };
   onRangeChange?: (value: { from: string; to: string }) => void;
   onLabelClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -27,15 +29,18 @@ export type { FilterInputType };
 export function HeaderFilter({
   label,
   value,
+  selectedValues,
   type,
   options,
   onChange,
+  onSelectedValuesChange,
   rangeValue,
   onRangeChange,
   onLabelClick,
   sortDirection,
 }: HeaderFilterProps) {
   const normalizedValue = value ?? "";
+  const normalizedSelectedValues = selectedValues ?? [];
   const range = rangeValue ?? { from: "", to: "" };
   const optionList = useMemo(
     () => options?.filter((option) => option !== "") ?? [],
@@ -95,16 +100,19 @@ export function HeaderFilter({
     onLabelClick?.(event);
   };
 
-  const handleSelectOption = (option: string) => {
-    onChange(option);
-    setIsOpen(false);
+  const handleToggleOption = (option: string) => {
+    if (!onSelectedValuesChange) return;
+    const nextValues = normalizedSelectedValues.includes(option)
+      ? normalizedSelectedValues.filter((value) => value !== option)
+      : [...normalizedSelectedValues, option];
+    onSelectedValuesChange(nextValues);
   };
 
   const handleClear = () => {
     if (type === "date-range") {
       onRangeChange?.({ from: "", to: "" });
     } else {
-      onChange("");
+      onSelectedValuesChange?.([]);
     }
     setIsOpen(false);
   };
@@ -201,9 +209,29 @@ export function HeaderFilter({
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
+              gap: "4px",
             }}
           >
-            {"\u25BC"}
+            {normalizedSelectedValues.length > 0 ? (
+              <span
+                aria-hidden="true"
+                style={{
+                  minWidth: 16,
+                  height: 16,
+                  borderRadius: 999,
+                  backgroundColor: "rgba(0, 0, 0, 0.08)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "0 4px",
+                  fontSize: "0.65rem",
+                  fontWeight: 700,
+                }}
+              >
+                {normalizedSelectedValues.length}
+              </span>
+            ) : null}
+            <span aria-hidden="true">{"\u25BC"}</span>
           </button>
         ) : null}
       </div>
@@ -246,7 +274,10 @@ export function HeaderFilter({
                   fontSize: "0.75rem",
                   color: "var(--gr-ink)",
                   cursor: "pointer",
-                  fontWeight: normalizedValue === "" ? 600 : 400,
+                  fontWeight:
+                    normalizedValue === "" && normalizedSelectedValues.length === 0
+                      ? 600
+                      : 400,
                 }}
               >
                 All values
@@ -273,7 +304,7 @@ export function HeaderFilter({
                   <button
                     key={option}
                     type="button"
-                    onClick={() => handleSelectOption(option)}
+                    onClick={() => handleToggleOption(option)}
                     style={{
                       width: "100%",
                       border: "none",
@@ -283,10 +314,16 @@ export function HeaderFilter({
                       fontSize: "0.75rem",
                       color: "var(--gr-ink)",
                       cursor: "pointer",
-                      fontWeight: normalizedValue === option ? 600 : 400,
+                      fontWeight: normalizedSelectedValues.includes(option) ? 600 : 400,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
                     }}
                   >
-                    {option}
+                    <span aria-hidden="true">
+                      {normalizedSelectedValues.includes(option) ? "\u2611" : "\u2610"}
+                    </span>
+                    <span>{option}</span>
                   </button>
                 ))
               )}
