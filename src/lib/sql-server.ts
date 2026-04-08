@@ -153,6 +153,7 @@ base_src AS (
         t.Unit,
         t.Qty,
         t.UnitPrice,
+        CAST(NULL AS decimal(18, 2)) AS ExtendedCostOverride,
         t.ExportStatus,
         COALESCE(pepm.PE, 'No PE Found') AS PE,
         COALESCE(pepm.PM, 'No PM Found') AS PM,
@@ -178,6 +179,7 @@ base_src AS (
         t.Unit,
         t.Qty,
         t.UnitPrice,
+        CAST(NULL AS decimal(18, 2)) AS ExtendedCostOverride,
         t.ExportStatus,
         COALESCE(pepm.PE, 'No PE Found') AS PE,
         COALESCE(pepm.PM, 'No PM Found') AS PM,
@@ -199,6 +201,10 @@ other_src AS (
         Unit,
         Qty,
         UnitPrice,
+        CASE
+            WHEN OtherChargeID IN ('FSC', 'FSH') THEN Price
+            ELSE NULL
+        END AS ExtendedCostOverride,
         'Pending' AS SourceGroup
     FROM Tkeother
     WHERE VoidStatus <> 'V'
@@ -215,6 +221,10 @@ other_src AS (
         Unit,
         Qty,
         UnitPrice,
+        CASE
+            WHEN OtherChargeID IN ('FSC', 'FSH') THEN Price
+            ELSE NULL
+        END AS ExtendedCostOverride,
         'History' AS SourceGroup
     FROM Tkohist
     WHERE VoidStatus <> 'V'
@@ -280,6 +290,7 @@ base AS (
         b.Unit,
         b.Qty,
         b.UnitPrice,
+        b.ExtendedCostOverride,
         o.Description1 AS JobName,
         b.PE,
         b.PM,
@@ -315,6 +326,7 @@ e_raw AS (
         e.Unit,
         e.Qty,
         e.UnitPrice,
+        e.ExtendedCostOverride,
         o.Description1 AS JobName,
         b.PE,
         b.PM,
@@ -348,6 +360,7 @@ e_raw AS (
         f.Unit,
         f.Qty,
         f.UnitPrice,
+        CAST(NULL AS decimal(18, 2)) AS ExtendedCostOverride,
         o.Description1 AS JobName,
         b.PE,
         b.PM,
@@ -386,6 +399,7 @@ e_seq AS (
         d.Unit,
         d.Qty,
         d.UnitPrice,
+        d.ExtendedCostOverride,
         d.JobName,
         d.PE,
         d.PM,
@@ -419,6 +433,7 @@ final_rows AS (
         b.Unit,
         b.Qty,
         b.UnitPrice,
+        b.ExtendedCostOverride,
         b.JobName,
         b.PE,
         b.PM,
@@ -443,6 +458,7 @@ final_rows AS (
         e.Unit,
         e.Qty,
         e.UnitPrice,
+        e.ExtendedCostOverride,
         e.JobName,
         e.PE,
         e.PM,
@@ -469,6 +485,7 @@ annotated AS (
         fr.Unit,
         fr.Qty,
         fr.UnitPrice,
+        fr.ExtendedCostOverride,
         fr.JobName,
         fr.PE,
         fr.PM,
@@ -524,6 +541,7 @@ SELECT
     Unit,
     Qty,
     UnitPrice,
+    ExtendedCostOverride AS ExtendedCost,
     JobName,
     PE,
     PM,
@@ -569,6 +587,7 @@ export type TicketRecord = {
   Unit: string | null;
   Qty: number | string | null;
   UnitPrice: number | string | null;
+  ExtendedCost: number | string | null;
   JobName: string | null;
   PE: string | null;
   PM: string | null;

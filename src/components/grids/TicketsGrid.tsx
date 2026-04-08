@@ -37,6 +37,7 @@ type TicketRow = {
   Qty: number | null;
   UnitPrice: number | null;
   ExtendedCost: number | null;
+  ExtendedCostOverride: number | null;
   JobName: string;
   PE: string;
   PM: string;
@@ -57,6 +58,7 @@ type TicketRowField = Exclude<
   | "TicketDateTime"
   | "OnHold"
   | "IsWorkingRow"
+  | "ExtendedCostOverride"
   | "acctValidationStatus"
   | "acctValidationCode"
 >;
@@ -77,6 +79,7 @@ type TicketApiRow = {
   Unit: string | null;
   Qty: number | string | null;
   UnitPrice: number | string | null;
+  ExtendedCost?: number | string | null;
   JobName: string | null;
   PE?: string | null;
   PM?: string | null;
@@ -238,6 +241,20 @@ const formatDecimal = (value: number | null | undefined): string => {
   return decimalFormatter.format(value);
 };
 
+const isPercentUnitCostProduct = (productId: string | null | undefined): boolean => {
+  const normalized = asString(productId).toUpperCase();
+  return normalized === "FSC" || normalized === "FSH";
+};
+
+const formatUnitPrice = (
+  value: number | null | undefined,
+  productId: string | null | undefined
+): string => {
+  const formatted = formatDecimal(value);
+  if (!formatted) return "";
+  return isPercentUnitCostProduct(productId) ? `${formatted}%` : formatCurrency(value);
+};
+
 const asString = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined) return "";
   return String(value).trim();
@@ -262,6 +279,22 @@ const asNumber = (value: number | string | null | undefined): number | null => {
   return Number.isNaN(parsed) ? null : parsed;
 };
 
+const calculateExtendedCost = (
+  qty: number | null,
+  unitPrice: number | null,
+  extendedCostOverride?: number | null
+): number | null => {
+  if (extendedCostOverride !== null && extendedCostOverride !== undefined) {
+    return extendedCostOverride;
+  }
+
+  if (qty === null || unitPrice === null) {
+    return null;
+  }
+
+  return qty * unitPrice;
+};
+
 const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
   const parsedTicketDate =
     parseDateValue(record.TicketDateTime) ?? parseDateValue(record.TicketDate);
@@ -273,10 +306,12 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
 
   const qtyNumber = asNumber(record.Qty);
   const unitPriceNumber = asNumber(record.UnitPrice);
-  const extendedCost =
-    qtyNumber !== null && unitPriceNumber !== null
-      ? qtyNumber * unitPriceNumber
-      : null;
+  const extendedCostOverride = asNumber(record.ExtendedCost);
+  const extendedCost = calculateExtendedCost(
+    qtyNumber,
+    unitPriceNumber,
+    extendedCostOverride
+  );
 
   const ticketNo = asString(record.TicketNo);
   const uniqueId = asString(record.UniqueID);
@@ -312,6 +347,7 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
     Qty: qtyNumber,
     UnitPrice: unitPriceNumber,
     ExtendedCost: extendedCost,
+    ExtendedCostOverride: extendedCostOverride,
     JobName: asString(record.JobName),
     PE: peValue ? peValue : NO_PE_FOUND,
     PM: pmValue ? pmValue : NO_PM_FOUND,
@@ -324,6 +360,38 @@ const toTicketRow = (record: TicketApiRow, index: number): TicketRow => {
     OnHold: asNullableString(record.OnHold),
     IsWorkingRow: Boolean(record.IsWorkingRow),
   };
+};
+
+const applyAssociatedAaQtyToFscRows = (rows: TicketRow[]): TicketRow[] => {
+  const aaExtendedCostByTicket = new Map<string, number>();
+
+  rows.forEach((row) => {
+    if (row.ProductID !== "AA" || row.ExtendedCost === null) {
+      return;
+    }
+
+    const key = [row.TicketNo, row.UniqueID, row.TicketSource].join("|");
+    if (!aaExtendedCostByTicket.has(key)) {
+      aaExtendedCostByTicket.set(key, row.ExtendedCost);
+    }
+  });
+
+  return rows.map((row) => {
+    if (row.ProductID !== "FSC") {
+      return row;
+    }
+
+    const key = [row.TicketNo, row.UniqueID, row.TicketSource].join("|");
+    const associatedAaExtendedCost = aaExtendedCostByTicket.get(key);
+    if (associatedAaExtendedCost === undefined) {
+      return row;
+    }
+
+    return {
+      ...row,
+      Qty: associatedAaExtendedCost,
+    };
+  });
 };
 
 export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
@@ -1044,7 +1112,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
         key === "Qty"
           ? formatDecimal(cellValue as number)
           : key === "UnitPrice"
-          ? formatCurrency(cellValue as number)
+          ? formatUnitPrice(cellValue as number, row.ProductID)
           : String(cellValue).trim();
       if (dateColumns.has(key) || mode === "exact") {
         return candidate.toLowerCase() === normalizedFilter;
@@ -1117,7 +1185,7 @@ export default function TicketsGrid({ height = 500 }: TicketsGridProps) {
             : columnKey === "Qty"
             ? formatDecimal(value as number)
             : columnKey === "UnitPrice"
-            ? formatCurrency(value as number)
+            ? formatUnitPrice(value as number, row.ProductID)
             : String(value).trim();
         if (normalizedValue === "") {
           if (columnKey === "AcctCode") {
@@ -1610,7 +1678,7 @@ const columns = useMemo(() => {
                 : columnKey === "Qty"
                 ? () => formatDecimal(cellProps.row.Qty)
                 : columnKey === "UnitPrice"
-                ? () => formatCurrency(cellProps.row.UnitPrice)
+                ? () => formatUnitPrice(cellProps.row.UnitPrice, cellProps.row.ProductID)
                 : columnKey === "ExtendedCost"
                 ? () => formatCurrency(cellProps.row.ExtendedCost)
                 : isAcctColumn
@@ -1720,15 +1788,23 @@ const columns = useMemo(() => {
           const nextValue =
             explicitValue !== undefined ? explicitValue : (row.AcctCode ?? "");
           const normalized = normalizeAccountCode(nextValue ?? "");
+          const nextRow = {
+            ...existingRow,
+            ...row,
+            ExtendedCost: calculateExtendedCost(
+              row.Qty,
+              row.UnitPrice,
+              existingRow.ExtendedCostOverride
+            ),
+          };
 
           if (normalized.length === 0) {
             updatedMap.set(key, {
-              ...existingRow,
-              ...row,
-              AcctCode: "",
-              TaskDesc: "",
-              AcctDesc: "",
-              acctValidationStatus: "valid",
+                ...nextRow,
+                AcctCode: "",
+                TaskDesc: "",
+                AcctDesc: "",
+                acctValidationStatus: "valid",
               acctValidationCode: null,
             });
             return;
@@ -1737,18 +1813,17 @@ const columns = useMemo(() => {
           if (existingRow.AcctCode !== normalized) {
             rowsToValidate.push({ id: key, normalized });
             updatedMap.set(key, {
-              ...existingRow,
-              ...row,
-              AcctCode: normalized,
-              TaskDesc: "",
-              AcctDesc: "",
-              acctValidationStatus: "unknown",
+                ...nextRow,
+                AcctCode: normalized,
+                TaskDesc: "",
+                AcctDesc: "",
+                acctValidationStatus: "unknown",
               acctValidationCode: normalized,
             });
             return;
           }
 
-          updatedMap.set(key, { ...existingRow, ...row });
+          updatedMap.set(key, nextRow);
         };
 
         changedIndexes.forEach((idx) => {
@@ -1844,7 +1919,9 @@ const columns = useMemo(() => {
         throw new Error(data.error || "No data returned from server");
       }
 
-      const mapped = data.rows.map((record, index) => toTicketRow(record, index));
+      const mapped = applyAssociatedAaQtyToFscRows(
+        data.rows.map((record, index) => toTicketRow(record, index))
+      );
       setRows(mapped);
       setRowsVersion((prev) => prev + 1);
       setTextFilters({});

@@ -22,7 +22,7 @@ export default function CodingPage() {
             marginLeft: "0.5rem",
           }}
         >
-          v1.23
+          v1.24
         </span>
       </h1>
 
